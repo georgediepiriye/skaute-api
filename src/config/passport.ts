@@ -1,7 +1,18 @@
 import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import { Strategy as GoogleStrategy, Profile } from "passport-google-oauth20";
 import { User } from "../models/User.js";
 import config from "./config.js";
+
+// Use an intersection type (&) instead of 'extends'
+// This merges the standard Profile with our specific _json needs
+type GoogleProfile = Profile & {
+  _json: {
+    given_name?: string;
+    family_name?: string;
+    email_verified?: boolean;
+    picture?: string;
+  };
+};
 
 passport.use(
   new GoogleStrategy(
@@ -12,28 +23,35 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        const email = profile.emails?.[0].value;
+        // Cast to our combined type
+        const googleProfile = profile as GoogleProfile;
 
-        // Account Linking Logic: Search by Google ID OR Email
+        const email = googleProfile.emails?.[0].value;
+        const firstName =
+          googleProfile._json.given_name || googleProfile.name?.givenName;
+        const lastName =
+          googleProfile._json.family_name || googleProfile.name?.familyName;
+
+        // 1. Account Linking Logic
         let user = await User.findOne({
-          $or: [{ googleId: profile.id }, { email: email }],
+          $or: [{ googleId: googleProfile.id }, { email: email }],
         });
 
         if (user) {
           if (!user.googleId) {
-            user.googleId = profile.id;
-            if (!user.avatar) user.avatar = profile.photos?.[0].value;
+            user.googleId = googleProfile.id;
+            if (!user.image) user.image = googleProfile.photos?.[0].value;
             await user.save();
           }
           return done(null, user);
         }
 
-        // New User Creation
+        // 2. New User Creation
         user = await User.create({
-          googleId: profile.id,
-          name: profile.displayName,
+          googleId: googleProfile.id,
+          name: `${firstName} ${lastName}`.trim(),
           email: email,
-          image: profile.photos?.[0].value,
+          image: googleProfile.photos?.[0].value,
         });
 
         return done(null, user);
@@ -44,6 +62,7 @@ passport.use(
   ),
 );
 
-// Required even if not using sessions for Passport's internal flow
 passport.serializeUser((user: any, done) => done(null, user.id));
-passport.deserializeUser((id, done) => done(null, { id }));
+passport.deserializeUser((id, done) => done(null, { id } as any));
+
+export default passport;

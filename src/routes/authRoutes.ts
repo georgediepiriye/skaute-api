@@ -17,7 +17,10 @@ router.get("/me", authController.getMe);
 // 1. Redirect user to Google
 router.get(
   "/google",
-  passport.authenticate("google", { scope: ["profile", "email"] }),
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    prompt: "select_account",
+  }),
 );
 
 // 2. Google redirects back here
