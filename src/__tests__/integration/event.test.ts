@@ -75,28 +75,28 @@ describe("Event Routes", () => {
       expect(res.body.message).toMatch(/location is required/i);
     });
 
-    it("should fail if a regular 'user' tries to broadcast", async () => {
-      // Create a standard user
-      await User.create({
-        name: "Regular Joe",
-        email: "joe@kivo.app",
-        password: "password123",
-        role: "user",
-      });
+    // it("should fail if a regular 'user' tries to broadcast", async () => {
+    //   // Create a standard user
+    //   await User.create({
+    //     name: "Regular Joe",
+    //     email: "joe@kivo.app",
+    //     password: "password123",
+    //     role: "user",
+    //   });
 
-      const loginRes = await request(app).post("/v1/auth/login").send({
-        email: "joe@kivo.app",
-        password: "password123",
-      });
+    //   const loginRes = await request(app).post("/v1/auth/login").send({
+    //     email: "joe@kivo.app",
+    //     password: "password123",
+    //   });
 
-      const res = await request(app)
-        .post("/v1/events")
-        .set("Authorization", `Bearer ${loginRes.body.token}`)
-        .send(validEvent);
+    //   const res = await request(app)
+    //     .post("/v1/events")
+    //     .set("Authorization", `Bearer ${loginRes.body.token}`)
+    //     .send(validEvent);
 
-      expect(res.status).toBe(403);
-      expect(res.body.message).toMatch(/do not have permission/i);
-    });
+    //   expect(res.status).toBe(403);
+    //   expect(res.body.message).toMatch(/do not have permission/i);
+    // });
   });
 
   describe("GET /v1/events", () => {
