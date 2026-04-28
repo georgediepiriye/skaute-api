@@ -34,7 +34,7 @@ export const sendTicketEmail = async (
 
     const { data, error } = await resend.emails.send({
       from: "onboarding@resend.dev",
-      to: to, // Changed this to the dynamic recipient
+      to: to,
       subject: "🎟️ Your Kivo Event Tickets!",
       html: `
         <div style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">

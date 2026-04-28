@@ -7,7 +7,7 @@ import { z } from "zod";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env from the root directory (assuming this file is in src/config/)
+// Load .env from the root directory
 dotenv.config({ path: path.join(__dirname, "../../.env") });
 
 const envVarsSchema = z
@@ -86,10 +86,18 @@ let envVars;
 try {
   envVars = envVarsSchema.parse(process.env);
 } catch (err: any) {
-  const formattedError = JSON.stringify(err.issues, null, 2);
-  // Using console.error here helps see the Zod issues clearly in the terminal
-  console.error("❌ Invalid environment variables:", formattedError);
-  throw new Error(`Config validation error`);
+  // We format the Zod issues into a readable string
+  const issues = err.issues
+    .map((i: any) => `[${i.path.join(".")}] ${i.message}`)
+    .join("\n   ");
+
+  const errorMessage = `\n❌ Invalid Environment Variables:\n   ${issues}\n`;
+
+  // LOG IT: So it shows in the console
+  console.error(errorMessage);
+
+  // THROW IT: So GitHub Actions captures the specific missing keys in the error summary
+  throw new Error(errorMessage);
 }
 
 // Exported structured object
