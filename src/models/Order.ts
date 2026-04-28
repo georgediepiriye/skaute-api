@@ -37,7 +37,7 @@ const orderSchema = new Schema<IOrder>(
       default: ORDER_STATUS.PENDING,
     },
     paymentReference: { type: String, unique: true, required: true },
-    paymentUrl: { type: String, required: true },
+    paymentUrl: { type: String },
     expiresAt: { type: Date, index: { expires: 0 } },
   },
   { timestamps: true },

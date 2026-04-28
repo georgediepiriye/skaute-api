@@ -1,17 +1,34 @@
+import { Event } from "../../models/Event.js";
+import { Ticket } from "../../models/Ticket.js";
 import { User, IUser } from "../../models/User.js";
-import logger from "../../utils/logger.js"; // Import your winston logger
+import logger from "../../utils/logger.js";
 
 export const getUserProfile = async (userId: string) => {
   logger.debug(`Profile Fetch Attempt: UserID=${userId}`);
 
-  const user = await User.findById(userId).select("-password").lean();
+  // Fetch all three data sets in parallel
+  const [user, organizedEvents, tickets] = await Promise.all([
+    User.findById(userId).select("-password").lean(),
+    Event.find({
+      $or: [{ organizer: userId }, { coOrganizers: userId }],
+    }).sort("-startDate"),
+
+    Ticket.find({ owner: userId })
+      .populate("event", "title date location image")
+      .sort({ createdAt: -1 })
+      .lean(),
+  ]);
 
   if (!user) {
     logger.warn(`Profile Fetch Failed: UserID ${userId} not found`);
     throw new Error("User profile not found");
   }
 
-  return user;
+  return {
+    ...user,
+    organizedEvents,
+    tickets,
+  };
 };
 
 export const updateUserProfile = async (

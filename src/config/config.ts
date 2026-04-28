@@ -45,6 +45,9 @@ const envVarsSchema = z
     // Third-party APIs
     SENDGRID_API_KEY: z.string().describe("SendGrid API key"),
     SENTRY_DSN: z.string().url().describe("Sentry error tracking"),
+    RESEND_API_KEY: z
+      .string()
+      .describe("Resend API key for transactional emails"),
     GOOGLE_CLIENT_ID: z.string().describe("Google OAuth Client ID"),
     GOOGLE_CLIENT_SECRET: z.string().describe("Google OAuth Client Secret"),
 
@@ -116,6 +119,7 @@ const config = {
   sendGridApiKey: envVars.SENDGRID_API_KEY,
   tax: envVars.KIVO_TAX_PERCENTAGE,
   sentryDsn: envVars.SENTRY_DSN,
+  resendApiKey: envVars.RESEND_API_KEY,
   googleOAuth: {
     clientId: envVars.GOOGLE_CLIENT_ID,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET,

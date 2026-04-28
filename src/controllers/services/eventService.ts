@@ -1,5 +1,9 @@
 import { Event, IEvent } from "../../models/Event.js";
-import logger from "../../utils/logger.js"; // Import your winston logger
+import { Ticket } from "../../models/Ticket.js";
+import { User } from "../../models/User.js";
+import AppError from "../../utils/AppError.js";
+import logger from "../../utils/logger.js";
+import httpStatus from "http-status";
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -179,4 +183,151 @@ export const getEventById = async (id: string) => {
   }
 
   return event;
+};
+
+export const getManagementDashboardData = async (
+  eventId: string,
+  userId: string,
+) => {
+  // 1. Fetch Event with populated Organizer and Co-Organizers
+  const event = await Event.findById(eventId).populate(
+    "coOrganizers",
+    "name image email",
+  );
+
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
+
+  // 2. Security Check
+  // Note: We check against the ID property because the objects are now populated
+  const isOwner = event.organizer._id.toString() === userId;
+  const isCoOrg = event.coOrganizers?.some(
+    (coOrg: any) => coOrg._id.toString() === userId,
+  );
+
+  if (!isOwner && !isCoOrg) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "You do not have permission to manage this move.",
+    );
+  }
+
+  // 3. Fetch all "valid" or "used" tickets for this event
+  const tickets = await Ticket.find({
+    event: eventId,
+    status: { $in: ["valid", "used"] },
+  })
+    .sort("-createdAt")
+    .populate("owner", "name image");
+
+  // 4. Calculate Real-time Metrics
+  const revenue = tickets.reduce((acc, ticket) => acc + ticket.pricePaid, 0);
+  const checkInCount = tickets.filter(
+    (t) => t.status === "used" || t.checkedInAt,
+  ).length;
+
+  // 5. Group Sales by Tier
+  const salesByTier = event.ticketTiers.map((tier: any) => {
+    const soldForThisTier = tickets.filter(
+      (t) => t.tierName === tier.name,
+    ).length;
+    return {
+      name: tier.name,
+      sold: soldForThisTier,
+      capacity: tier.capacity,
+      revenue: tickets
+        .filter((t) => t.tierName === tier.name)
+        .reduce((a, b) => a + b.pricePaid, 0),
+    };
+  });
+
+  return {
+    event,
+    attendees: tickets,
+    metrics: {
+      totalRevenue: revenue,
+      totalTicketsSold: tickets.length,
+      checkInCount,
+      salesByTier,
+    },
+  };
+};
+
+export const addPartnerToEvent = async (
+  eventId: string,
+  email: string,
+  organizerId: string,
+) => {
+  const event = await Event.findById(eventId);
+  if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+
+  if (event.organizer.toString() !== organizerId) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Only the main host can add co-organizers",
+    );
+  }
+
+  const userToAdd = await User.findOne({ email });
+  if (!userToAdd) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      "User not found. They must sign up on Kivo first.",
+    );
+  }
+
+  if (userToAdd._id.toString() === event.organizer.toString()) {
+    throw new AppError(httpStatus.BAD_REQUEST, "You are already the host");
+  }
+
+  const alreadyPartner = event.coOrganizers?.some(
+    (id: { toString: () => any }) => id.toString() === userToAdd._id.toString(),
+  );
+  if (alreadyPartner) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "This user is already a partner",
+    );
+  }
+
+  const updatedEvent = await Event.findByIdAndUpdate(
+    eventId,
+    { $addToSet: { coOrganizers: userToAdd._id } },
+    { new: true, runValidators: true },
+  );
+
+  logger.info(`Partner Added: EventID=${eventId} Partner=${email}`);
+
+  return updatedEvent;
+};
+
+export const removePartnerFromEvent = async (
+  eventId: string,
+  partnerId: string,
+  organizerId: string,
+) => {
+  // 1. Find the event
+  const event = await Event.findById(eventId);
+  if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+
+  // 2. Security: Only the MAIN organizer can remove partners
+  // Co-organizers should not be able to remove each other
+  if (event.organizer.toString() !== organizerId) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Only the main host has permission to remove partners",
+    );
+  }
+
+  // 3. Update the event using $pull
+  const updatedEvent = await Event.findByIdAndUpdate(
+    eventId,
+    { $pull: { coOrganizers: partnerId } },
+    { new: true, runValidators: true },
+  ).populate("coOrganizers", "name image email");
+
+  logger.info(`Partner Removed: EventID=${eventId} PartnerID=${partnerId}`);
+
+  return updatedEvent;
 };

@@ -164,4 +164,34 @@ export const createEventSchema = z.object({
     ),
 });
 
+export const eventIdParamSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID format"),
+  }),
+});
+
+export const addCoOrganizerSchema = z.object({
+  params: z.object({
+    eventId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID format"),
+  }),
+  body: z.object({
+    email: z
+      .string()
+      .email("Please provide a valid partner email")
+      .lowercase()
+      .trim(),
+  }),
+});
+
+export const removeCoOrganizerSchema = z.object({
+  params: z.object({
+    eventId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID format"),
+    partnerId: z
+      .string()
+      .regex(/^[0-9a-fA-F]{24}$/, "Invalid Partner ID format"),
+  }),
+});
+
 export type CreateEventInput = z.infer<typeof createEventSchema>["body"];
+export type EventIdParam = z.infer<typeof eventIdParamSchema>["params"];
+export type AddCoOrganizerInput = z.infer<typeof addCoOrganizerSchema>;

@@ -39,6 +39,7 @@ export interface IEvent extends Document {
 
   image: string;
   organizer: mongoose.Types.ObjectId;
+  coOrganizers: mongoose.Types.ObjectId[];
   organizerType: "individual" | "business";
 
   // Pricing & Tickets
@@ -172,6 +173,7 @@ const eventSchema = new Schema<IEvent>(
     attendees: { type: Number, default: 0 },
     participantImages: [{ type: String }],
     organizer: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    coOrganizers: [{ type: Schema.Types.ObjectId, ref: "User" }],
     organizerType: {
       type: String,
       enum: ["individual", "business"],
@@ -245,6 +247,10 @@ eventSchema.virtual("startingPrice").get(function (this: IEvent) {
   if (this.isFree || !this.ticketTiers || this.ticketTiers.length === 0)
     return 0;
   return Math.min(...this.ticketTiers.map((tier) => tier.price));
+});
+
+eventSchema.virtual("ticketsSold").get(function (this: IEvent) {
+  return this.attendees || 0;
 });
 
 /**

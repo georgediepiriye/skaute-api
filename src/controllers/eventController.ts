@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import * as eventService from "./services/eventService.js";
 import httpStatus from "http-status";
 import { IUser } from "../models/User.js";
+import logger from "../utils/logger.js";
 
 export const createEvent = async (
   req: Request,
@@ -102,6 +103,84 @@ export const getEvent = async (
     res.status(httpStatus.OK).json({
       status: "success",
       data: { event },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getManagementDashboardData = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const eventId = req.params.id as string;
+    const user = (req as any).user as IUser;
+
+    logger.info(`Management Access: User=${user.email} EventID=${eventId}`);
+    const managementData = await eventService.getManagementDashboardData(
+      eventId,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: managementData,
+    });
+  } catch (error: any) {
+    logger.error(
+      `Management Access Failed: ${error.message} | User=${(req as any).user?.email}`,
+    );
+    next(error);
+  }
+};
+
+export const addCoOrganizer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const eventId = req.params.eventId as string;
+    const { email } = req.body;
+    const user = (req as any).user;
+
+    const updatedEvent = await eventService.addPartnerToEvent(
+      eventId,
+      email,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Partner added successfully",
+      data: { event: updatedEvent },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const removeCoOrganizer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { eventId, partnerId } = req.params;
+    const user = (req as any).user;
+
+    const updatedEvent = await eventService.removePartnerFromEvent(
+      eventId as string,
+      partnerId as string,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Partner removed successfully",
+      data: { event: updatedEvent },
     });
   } catch (error) {
     next(error);
