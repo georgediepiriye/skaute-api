@@ -182,16 +182,16 @@ export const HOTSPOT_STATUS = {
  * Tracking the lifecycle of a purchase from issuance to entry.
  */
 export const TICKET_STATUS = {
-  valid: { label: "Valid", color: "#22c55e" }, // Green
-  used: { label: "Checked In", color: "#64748b" }, // Slate
-  refunded: { label: "Refunded", color: "#ef4444" }, // Red
-  cancelled: { label: "Cancelled", color: "#000000" }, // Black
+  valid: "valid",
+  used: "used",
+  refunded: "refunded",
+  cancelled: "cancelled",
 } as const;
 
 export type KivoType = keyof typeof EVENT_TYPES;
 export type EventCategory = keyof typeof EVENT_CATEGORIES;
 export type HotspotCategory = keyof typeof HOTSPOT_CATEGORIES;
 export type HotspotStatus = keyof typeof HOTSPOT_STATUS;
-export type TicketStatus = keyof typeof TICKET_STATUS;
+export type TicketStatus = (typeof TICKET_STATUS)[keyof typeof TICKET_STATUS];
 export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
 export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];

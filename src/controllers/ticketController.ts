@@ -3,9 +3,11 @@ import httpStatus from "http-status";
 import { Ticket } from "../models/Ticket.js";
 import AppError from "../utils/AppError.js";
 import * as ticketService from "./services/ticketService.js";
-import { BookTicketInput } from "../validation/ticketValidation.js";
-import { PaystackService } from "../utils/paystackServices.js";
 import { Order } from "../models/Order.js";
+import {
+  SyncTicketsParams,
+  SyncTicketsQuery,
+} from "../validation/ticketValidation.js";
 
 /**
  * @desc    Initialize a ticket booking
@@ -73,60 +75,107 @@ export const verifyTicketPayment = async (req: Request, res: Response) => {
 };
 
 /**
- * @desc    Get all tickets belonging to the logged-in user
- * @route   GET /api/v1/tickets/my-tickets
- * @access  Protected
+ * @desc    Get single ticket details for the QR page
+ * @route   GET /v1/tickets/:id
+ * @access  Private (Owner or Staff)
  */
-// export const getMyTickets = async (
-//   req: Request,
-//   res: Response,
-//   next: NextFunction,
-// ) => {
-//   try {
-//     const tickets = await Ticket.find({ owner: req.user.id })
-//       .populate({
-//         path: "event",
-//         select: "title startDate location image eventFormat",
-//       })
-//       .sort("-createdAt");
+export const getTicketDetails = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const ticket = await ticketService.getTicketById(id as string);
 
-//     res.status(httpStatus.OK).json({
-//       status: "success",
-//       results: tickets.length,
-//       data: { tickets },
-//     });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    if (!ticket) {
+      return next(new AppError("Ticket not found", httpStatus.NOT_FOUND));
+    }
+
+    // SECURITY: Ensure the person asking is the owner or Kivo staff
+    const userId = (req.user as any)?.id?.toString();
+    const userRole = (req.user as any)?.role;
+    const isStaff = ["admin", "staff", "organizer"].includes(userRole);
+
+    if (ticket.owner?.toString() !== userId && !isStaff) {
+      return next(
+        new AppError(
+          "You do not have permission to view this ticket",
+          httpStatus.FORBIDDEN,
+        ),
+      );
+    }
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: ticket,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
- * @desc    Get details for a single ticket (includes QR data)
- * @route   GET /api/v1/tickets/:id
- * @access  Protected
+ * @desc    Process live check-in via QR scan
+ * @route   POST /v1/tickets/check-in/:eventId
+ * @access  Private (Organizer/Staff)
  */
-// export const getTicketDetails = async (
-//   req: Request,
-//   res: Response,
-//   next: NextFunction,
-// ) => {
-//   try {
-//     const ticket = await Ticket.findOne({
-//       _id: req.params.id,
-//       owner: req.user.id,
-//     }).populate("event");
+export const validateCheckIn = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { checkInCode } = req.body;
+    const { eventId } = req.params;
+    const scannerId = (req as any).user.id;
+    console.log("Scanner ID:__", scannerId);
+    console.log("Event ID:__", eventId);
+    console.log("Check-in Code:__", checkInCode);
 
-//     if (!ticket) {
-//       return next(
-//         new AppError(httpStatus.NOT_FOUND, "Ticket not found or access denied"),
-//       );
-//     }
+    const checkInData = await ticketService.processTicketCheckIn(
+      checkInCode,
+      eventId as string,
+      scannerId,
+    );
 
-//     res.status(httpStatus.OK).json({
-//       status: "success",
-//       data: { ticket },
-//     });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Check-in successful!",
+      data: checkInData,
+    });
+  } catch (error: any) {
+    // Error is caught here and passed to your global error handler
+    // If it's a 409 or 404 from our service, it will have the correct status code
+    next(error);
+  }
+};
+
+export const syncTickets = async (
+  req: Request<SyncTicketsParams, any, any, SyncTicketsQuery>,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { eventId } = req.params;
+    const { since } = req.query;
+
+    const syncDate = new Date(Number(since));
+
+    const tickets = await Ticket.find({
+      event: eventId,
+      updatedAt: { $gt: syncDate },
+    })
+      .select("buyerInfo tierName status checkInCode updatedAt")
+      .lean();
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      count: tickets.length,
+      serverTime: Date.now(),
+      data: tickets,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

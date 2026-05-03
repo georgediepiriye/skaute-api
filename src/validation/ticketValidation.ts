@@ -11,4 +11,32 @@ export const bookTicketSchema = z.object({
   }),
 });
 
+export const validateCheckInSchema = z.object({
+  params: z.object({
+    eventId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID"),
+  }),
+  body: z.object({
+    checkInCode: z.string().min(5, "Invalid QR code format").trim(),
+  }),
+});
+
+export const syncTicketsSchema = z.object({
+  params: z.object({
+    eventId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID"),
+  }),
+  query: z.object({
+    // 'since' is a timestamp string from the URL, so we transform it to a number
+    since: z.string().optional().default("0"),
+  }),
+});
+
+export type SyncTicketsParams = z.infer<typeof syncTicketsSchema>["params"];
+export type SyncTicketsQuery = z.infer<typeof syncTicketsSchema>["query"];
+
 export type BookTicketInput = z.infer<typeof bookTicketSchema>["body"];
+export type ValidateCheckInInput = z.infer<
+  typeof validateCheckInSchema
+>["body"];
+export type ValidateCheckInParams = z.infer<
+  typeof validateCheckInSchema
+>["params"];

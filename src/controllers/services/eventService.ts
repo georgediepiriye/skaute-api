@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Event, IEvent } from "../../models/Event.js";
 import { Ticket } from "../../models/Ticket.js";
 import { User } from "../../models/User.js";
@@ -188,67 +189,108 @@ export const getEventById = async (id: string) => {
 export const getManagementDashboardData = async (
   eventId: string,
   userId: string,
+  page: number = 1,
+  limit: number = 20,
 ) => {
-  // 1. Fetch Event with populated Organizer and Co-Organizers
+  // 1. Fetch Event with Auth Check
   const event = await Event.findById(eventId).populate(
     "coOrganizers",
     "name image email",
   );
 
-  if (!event) {
-    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
-  }
+  if (!event) throw new Error("Event not found");
 
-  // 2. Security Check
-  // Note: We check against the ID property because the objects are now populated
-  const isOwner = event.organizer._id.toString() === userId;
+  const isOwner = event.organizer.toString() === userId;
   const isCoOrg = event.coOrganizers?.some(
     (coOrg: any) => coOrg._id.toString() === userId,
   );
 
-  if (!isOwner && !isCoOrg) {
-    throw new AppError(
-      httpStatus.FORBIDDEN,
-      "You do not have permission to manage this move.",
-    );
-  }
+  if (!isOwner && !isCoOrg) throw new Error("Unauthorized");
 
-  // 3. Fetch all "valid" or "used" tickets for this event
-  const tickets = await Ticket.find({
-    event: eventId,
-    status: { $in: ["valid", "used"] },
-  })
-    .sort("-createdAt")
-    .populate("owner", "name image");
+  // 2. Metrics Calculation (Optimized Aggregation)
+  // Instead of fetching all docs, we let MongoDB do the math.
+  const metricsData = await Ticket.aggregate([
+    {
+      $match: {
+        event: new mongoose.Types.ObjectId(eventId),
+        status: { $in: ["valid", "used"] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: "$pricePaid" },
+        totalSold: { $sum: 1 },
+        checkInCount: {
+          $sum: { $cond: [{ $eq: ["$status", "used"] }, 1, 0] },
+        },
+      },
+    },
+  ]);
 
-  // 4. Calculate Real-time Metrics
-  const revenue = tickets.reduce((acc, ticket) => acc + ticket.pricePaid, 0);
-  const checkInCount = tickets.filter(
-    (t) => t.status === "used" || t.checkedInAt,
-  ).length;
+  const stats = metricsData[0] || {
+    totalRevenue: 0,
+    totalSold: 0,
+    checkInCount: 0,
+  };
 
-  // 5. Group Sales by Tier
+  // 3. Sales By Tier (Using your schema's tierName)
+  const tierStats = await Ticket.aggregate([
+    {
+      $match: {
+        event: new mongoose.Types.ObjectId(eventId),
+        status: { $in: ["valid", "used"] },
+      },
+    },
+    {
+      $group: {
+        _id: "$tierName",
+        sold: { $sum: 1 },
+        revenue: { $sum: "$pricePaid" },
+      },
+    },
+  ]);
+
+  // Map aggregation results back to event tiers to include capacity
   const salesByTier = event.ticketTiers.map((tier: any) => {
-    const soldForThisTier = tickets.filter(
-      (t) => t.tierName === tier.name,
-    ).length;
+    const stat = tierStats.find((s) => s._id === tier.name);
     return {
       name: tier.name,
-      sold: soldForThisTier,
+      sold: stat?.sold || 0,
       capacity: tier.capacity,
-      revenue: tickets
-        .filter((t) => t.tierName === tier.name)
-        .reduce((a, b) => a + b.pricePaid, 0),
+      revenue: stat?.revenue || 0,
     };
   });
 
+  // 4. Paginated Attendees
+  const skip = (page - 1) * limit;
+
+  const [attendees, totalCount] = await Promise.all([
+    Ticket.find({ event: eventId, status: { $in: ["valid", "used"] } })
+      .sort("-createdAt")
+      .skip(skip)
+      .limit(limit)
+      .populate("owner", "name image")
+      .lean(), // Use lean for faster read-only queries
+    Ticket.countDocuments({
+      event: eventId,
+      status: { $in: ["valid", "used"] },
+    }),
+  ]);
+
   return {
     event,
-    attendees: tickets,
+    attendees,
+    pagination: {
+      total: totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+    },
     metrics: {
-      totalRevenue: revenue,
-      totalTicketsSold: tickets.length,
-      checkInCount,
+      totalRevenue: stats.totalRevenue,
+      totalTicketsSold: stats.totalSold,
+      checkInCount: stats.checkInCount,
       salesByTier,
     },
   };
