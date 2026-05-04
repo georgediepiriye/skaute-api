@@ -24,7 +24,7 @@ export const sendTicketEmail = async (
               style="width: 150px; height: 150px;" 
             />
             <p style="font-family: monospace; font-size: 16px; letter-spacing: 2px; margin-top: 10px; color: #000; font-weight: bold;">
-              ${ticket.ticketCode}
+              ${ticket.checkInCode}
             </p>
           </div>
         </div>

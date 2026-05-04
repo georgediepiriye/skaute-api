@@ -14,7 +14,6 @@ export const createNewEvent = async (
     delete eventData.location;
   }
 
-  // AUDIT LOG: Identify who is broadcasting what
   logger.info(
     `Event Broadcast Initiated: Title="${eventData.title}" OrganizerID=${organizerId}`,
   );
@@ -34,6 +33,119 @@ export const createNewEvent = async (
   }
 
   return mainEvent;
+};
+
+export const updateEvent = async (
+  eventId: string,
+  updateData: Partial<IEvent>,
+  userId: string,
+) => {
+  // 1. Find the existing event
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
+
+  // 2. Authorization Check
+  const isOrganizer = event.organizer.toString() === userId;
+  const isCoOrganizer = event.coOrganizers?.some(
+    (id: any) => id.toString() === userId,
+  );
+
+  if (!isOrganizer && !isCoOrganizer) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "You are not authorized to edit this event",
+    );
+  }
+
+  // 3. Ticketing Edit Protection logic
+  // Prevents breaking the event's financial integrity if tickets are already sold
+  if (updateData.ticketTiers) {
+    for (const existingTier of event.ticketTiers) {
+      const incomingTier = updateData.ticketTiers.find(
+        (t) => t.name === existingTier.name,
+      );
+
+      // Check if any tickets have been sold for this specific tier
+      // (Assumes you have a 'sold' field in your ticketTier sub-schema)
+      const ticketsSold = existingTier.sold || 0;
+
+      if (ticketsSold > 0) {
+        // Prevent deleting a tier that has active attendees
+        if (!incomingTier) {
+          throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Cannot remove the '${existingTier.name}' tier because tickets have already been sold.`,
+          );
+        }
+
+        // Prevent reducing capacity below the number of people already confirmed
+        if (incomingTier.capacity < ticketsSold) {
+          throw new AppError(
+            httpStatus.BAD_REQUEST,
+            `Capacity for '${existingTier.name}' cannot be lowered to ${incomingTier.capacity} because ${ticketsSold} tickets are already sold.`,
+          );
+        }
+      }
+    }
+  }
+
+  // 4. Handle Format-Specific Logic
+  if (updateData.eventFormat === "online") {
+    updateData.location = undefined;
+    updateData.isOnline = true;
+  } else if (
+    updateData.eventFormat === "physical" ||
+    updateData.eventFormat === "hybrid"
+  ) {
+    updateData.isOnline = false;
+  }
+
+  // 5. Perform the update
+  const updatedEvent = await Event.findByIdAndUpdate(
+    eventId,
+    { $set: updateData },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+
+  if (!updatedEvent) {
+    throw new AppError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to update event",
+    );
+  }
+
+  // 6. Handle Recurring Logic Sync
+  // If this is a parent event, propagate "cosmetic" changes to all future instances
+  if (updatedEvent.isRecurring && !updatedEvent.recurrence?.parentId) {
+    const syncFields: any = {};
+    if (updateData.title) syncFields.title = updatedEvent.title;
+    if (updateData.description)
+      syncFields.description = updatedEvent.description;
+    if (updateData.image) syncFields.image = updatedEvent.image;
+    if (updateData.category) syncFields.category = updatedEvent.category;
+
+    if (Object.keys(syncFields).length > 0) {
+      await Event.updateMany(
+        {
+          "recurrence.parentId": updatedEvent._id,
+          startDate: { $gt: new Date() }, // Only sync future instances
+        },
+        { $set: syncFields },
+      );
+      logger.info(
+        `Synced recurring instances for ParentID=${updatedEvent._id}`,
+      );
+    }
+  }
+
+  logger.info(`Event Updated: ID=${eventId} by User=${userId}`);
+  return updatedEvent;
 };
 
 export const generateEventInstances = async (parentEvent: IEvent) => {

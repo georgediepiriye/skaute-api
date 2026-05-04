@@ -34,6 +34,37 @@ export const createEvent = async (
   }
 };
 
+export const updateEvent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+    const user = (req as any).user as IUser;
+
+    // Handle online format logic same as creation
+    if (updateData.eventFormat === "online") {
+      updateData.location = null;
+      updateData.isOnline = true;
+    }
+
+    const updatedEvent = await eventService.updateEvent(
+      id as string,
+      updateData,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { event: updatedEvent },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAllEvents = async (
   req: Request,
   res: Response,

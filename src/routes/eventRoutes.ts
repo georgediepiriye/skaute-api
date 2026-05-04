@@ -7,6 +7,7 @@ import {
   eventIdParamSchema,
   addCoOrganizerSchema,
   removeCoOrganizerSchema,
+  updateEventSchema,
 } from "../validation/eventValidation.js";
 
 const router = Router();
@@ -21,6 +22,7 @@ router.get("/:id", eventController.getEvent);
 router.use(protect);
 
 router.post("/", validate(createEventSchema), eventController.createEvent);
+router.patch("/:id", validate(updateEventSchema), eventController.updateEvent);
 router.get(
   "/:id/manage",
   validate(eventIdParamSchema),
