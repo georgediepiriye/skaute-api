@@ -11,6 +11,7 @@ import config from "../../config/config.js";
 import { Ticket } from "../../models/Ticket.js";
 import logger from "../../utils/logger.js";
 import kivoEvents from "../../utils/eventsEmitter.js";
+import { User } from "../../models/User.js";
 
 const getExistingPendingOrder = async (
   email: string,
@@ -34,68 +35,47 @@ export const lockInventory = async (
   eventId: string,
   tierName: string,
   quantity: number,
-  session?: ClientSession,
+  session: ClientSession,
 ): Promise<number> => {
   logger.debug(
     `Inventory Lock Attempt: Event=${eventId} Tier=${tierName} Qty=${quantity}`,
   );
 
-  // ATOMIC UPDATE: We include the capacity check inside the filter.
-  // This ensures the update ONLY happens if (current sold + quantity) <= capacity.
-  const updatedEvent = await Event.findOneAndUpdate(
-    {
-      _id: eventId,
-      ticketTiers: {
-        $elemMatch: {
-          name: tierName,
-          $expr: {
-            $lte: [{ $add: ["$sold", quantity] }, "$capacity"],
-          },
-        },
-      },
-    },
-    {
-      $inc: {
-        "ticketTiers.$[tier].sold": quantity,
-        attendees: quantity,
-      },
-    },
-    {
-      // Use arrayFilters to target the specific tier found by name
-      arrayFilters: [{ "tier.name": tierName }],
-      new: true,
-      runValidators: true,
-      session,
-    },
-  );
+  const event = await Event.findById(eventId).session(session);
 
-  if (!updatedEvent) {
-    logger.warn(
-      `Inventory Lock Failed: Event ${eventId} is either non-existent or Tier "${tierName}" is sold out.`,
-    );
-
-    const eventExists = await Event.findById(eventId).lean();
-    if (!eventExists) {
-      throw new AppError(httpStatus.NOT_FOUND, "Event not found.");
-    }
-
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      `Sold Out: The "${tierName}" tier does not have enough remaining capacity for ${quantity} ticket(s).`,
-    );
+  if (!event) {
+    logger.warn(`Inventory Lock Failed: Event ${eventId} not found.`);
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found.");
   }
 
-  // Find the tier in the updated document to return the price
-  const tier = updatedEvent.ticketTiers.find((t: any) => t.name === tierName);
+  const tier = event.ticketTiers.find((t: any) => t.name === tierName);
 
   if (!tier) {
+    logger.warn(
+      `Inventory Lock Failed: Tier "${tierName}" not found in event.`,
+    );
     throw new AppError(
-      httpStatus.INTERNAL_SERVER_ERROR,
-      "Internal integrity error: Ticket tier vanished during update.",
+      httpStatus.NOT_FOUND,
+      `Ticket tier "${tierName}" does not exist for this event.`,
     );
   }
 
-  // Log success for auditing
+  const remainingCapacity = tier.capacity - tier.sold;
+  if (remainingCapacity < quantity) {
+    logger.warn(
+      `Inventory Lock Failed: ${tierName} is sold out or lacks capacity.`,
+    );
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      `Sold Out: Only ${remainingCapacity} spots left for the "${tierName}" tier.`,
+    );
+  }
+
+  tier.sold += quantity;
+  event.attendees = (event.attendees || 0) + quantity;
+
+  await event.save({ session });
+
   logger.info(
     `Inventory Locked: Event=${eventId} Tier=${tierName} NewSold=${tier.sold}/${tier.capacity}`,
   );
@@ -187,6 +167,20 @@ export const processBooking = async (
         { session },
       );
 
+      if (userId) {
+        const user = await User.findById(userId).session(session);
+        if (user?.image) {
+          await Event.updateOne(
+            {
+              _id: eventId,
+              participantImages: { $ne: user.image },
+              $expr: { $lt: [{ $size: "$participantImages" }, 5] },
+            },
+            { $push: { participantImages: user.image } },
+            { session },
+          );
+        }
+      }
       const { tickets, eventImage } = await createTicketsForOrder(
         order,
         buyerDetails,
@@ -278,6 +272,22 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
 
     order.status = ORDER_STATUS.COMPLETED;
     await order.save({ session });
+
+    if (order.user) {
+      const user = await User.findById(order.user).session(session);
+
+      if (user?.image) {
+        await Event.updateOne(
+          {
+            _id: order.event,
+            participantImages: { $ne: user.image },
+            $expr: { $lt: [{ $size: "$participantImages" }, 5] }, // Limit to 5 bubbles
+          },
+          { $push: { participantImages: user.image } },
+          { session },
+        );
+      }
+    }
 
     const { tickets, eventImage } = await createTicketsForOrder(
       order,
