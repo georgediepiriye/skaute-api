@@ -224,32 +224,92 @@ export const generateEventInstances = async (parentEvent: IEvent) => {
 
 export const getAllEvents = async (query: any) => {
   const queryObj = { ...query };
-  const excludedFields = ["page", "sort", "limit", "fields"];
+
+  // 1. Add timeStatus to excluded fields so it doesn't break the direct Mongoose match
+  const excludedFields = [
+    "page",
+    "sort",
+    "limit",
+    "fields",
+    "dateFilter",
+    "timeStatus",
+  ];
   excludedFields.forEach((el) => delete queryObj[el]);
 
-  // 1. Force the filter to only show approved and active events
-  const filter = {
-    ...JSON.parse(JSON.stringify(queryObj)),
-    approvalStatus: "approved", // Only show approved events
+  // 2. Force filter for approved and active events
+  let filter: any = {
+    ...queryObj,
+    approvalStatus: "approved",
     isCancelled: false,
   };
 
-  // 2. Handle Search Regex
   if (filter.title) filter.title = { $regex: filter.title, $options: "i" };
 
-  // 3. Date filtering (Only show upcoming moves)
-  filter.endDate = { $gte: new Date() };
+  const now = new Date();
 
-  logger.debug(
-    `Fetching Approved Events with filter: ${JSON.stringify(filter)}`,
-  );
+  // 3. Handle Date Filtering (Today, Tomorrow, Weekend)
+  if (query.dateFilter) {
+    const startOfToday = new Date(now.setHours(0, 0, 0, 0));
 
+    if (query.dateFilter === "today") {
+      const endOfToday = new Date(now.setHours(23, 59, 59, 999));
+      filter.startDate = { $lte: endOfToday };
+      filter.endDate = { $gte: startOfToday };
+    } else if (query.dateFilter === "tomorrow") {
+      const startOfTomorrow = new Date(startOfToday);
+      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+      const endOfTomorrow = new Date(startOfTomorrow);
+      endOfTomorrow.setHours(23, 59, 59, 999);
+
+      filter.startDate = { $lte: endOfTomorrow };
+      filter.endDate = { $gte: startOfTomorrow };
+    } else if (query.dateFilter === "weekend") {
+      const day = now.getDay();
+      const daysUntilNextFriday = (5 - day + 7) % 7 || 7;
+      const nextFriday = new Date(startOfToday);
+      nextFriday.setDate(nextFriday.getDate() + daysUntilNextFriday);
+
+      const nextSunday = new Date(nextFriday);
+      nextSunday.setDate(nextSunday.getDate() + 2);
+      nextSunday.setHours(23, 59, 59, 999);
+
+      filter.startDate = { $lte: nextSunday };
+      filter.endDate = { $gte: nextFriday };
+    }
+  }
+
+  // 4. Handle Live vs Upcoming Status
+  // This uses spread logic to avoid overwriting dateFilter if both are selected
+  if (query.timeStatus) {
+    const currentTime = new Date();
+
+    if (query.timeStatus === "live") {
+      // "Live Now" = Started in the past AND hasn't ended yet
+      filter.startDate = { ...filter.startDate, $lte: currentTime };
+      filter.endDate = { ...filter.endDate, $gte: currentTime };
+    } else if (query.timeStatus === "upcoming") {
+      // "Upcoming" = Starts in the future
+      filter.startDate = { ...filter.startDate, $gt: currentTime };
+    }
+  }
+  // 5. Default Fallback
+  // If no date or status filter is picked, show everything that hasn't ended yet
+  else if (!query.dateFilter) {
+    filter.endDate = { $gte: new Date() };
+  }
+
+  // 6. Handle Price
+  if (query.price === "free") {
+    filter.price = 0;
+  }
+
+  // Execute Query
   let dbQuery = Event.find(filter).populate({
     path: "organizer",
     select: "name image location",
   });
 
-  // 4. Sorting logic
+  // Sorting
   if (query.sort) {
     const sortBy = query.sort.split(",").join(" ");
     dbQuery = dbQuery.sort(sortBy);
@@ -257,15 +317,17 @@ export const getAllEvents = async (query: any) => {
     dbQuery = dbQuery.sort("-createdAt");
   }
 
-  // 5. Pagination
+  // Pagination
   const page = Number(query.page) || 1;
   const limit = Number(query.limit) || 20;
   const skip = (page - 1) * limit;
 
   dbQuery = dbQuery.skip(skip).limit(limit);
 
-  const events = await dbQuery;
-  const total = await Event.countDocuments(filter);
+  const [events, total] = await Promise.all([
+    dbQuery,
+    Event.countDocuments(filter),
+  ]);
 
   return { events, total, page, limit };
 };

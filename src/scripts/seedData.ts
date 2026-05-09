@@ -124,8 +124,6 @@ async function seedDatabase() {
         category: faker.helpers.arrayElement(categoryKeys),
         type: faker.helpers.arrayElement(typeKeys),
         status: faker.helpers.arrayElement(["casual", "verified", "featured"]),
-        // UPDATE: Added approvalStatus for Admin Dashboard Moderation
-        // 70% chance of being approved, 30% pending for your queue testing
         approvalStatus: Math.random() > 0.3 ? "approved" : "pending",
         medium: eventFormat,
         eventFormat,
