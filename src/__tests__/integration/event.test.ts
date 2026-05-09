@@ -109,6 +109,7 @@ describe("Event Routes", () => {
         type: "activity",
         status: "casual",
         category: "party",
+        approvalStatus: "approved",
         startDate: new Date(Date.now() + 86400000),
         endDate: new Date(Date.now() + 90000000),
         organizer: new mongoose.Types.ObjectId(),
@@ -121,6 +122,7 @@ describe("Event Routes", () => {
       });
 
       const res = await request(app).get("/v1/events");
+      console.log(res.body, "RES__");
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.data.events)).toBe(true);
