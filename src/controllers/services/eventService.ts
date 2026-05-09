@@ -227,19 +227,29 @@ export const getAllEvents = async (query: any) => {
   const excludedFields = ["page", "sort", "limit", "fields"];
   excludedFields.forEach((el) => delete queryObj[el]);
 
-  const filter = JSON.parse(JSON.stringify(queryObj));
+  // 1. Force the filter to only show approved and active events
+  const filter = {
+    ...JSON.parse(JSON.stringify(queryObj)),
+    approvalStatus: "approved", // Only show approved events
+    isCancelled: false,
+  };
 
+  // 2. Handle Search Regex
   if (filter.title) filter.title = { $regex: filter.title, $options: "i" };
+
+  // 3. Date filtering (Only show upcoming moves)
   filter.endDate = { $gte: new Date() };
 
-  // PERFORMANCE LOG: Check how heavy the filters are
-  logger.debug(`Fetching Events with filter: ${JSON.stringify(filter)}`);
+  logger.debug(
+    `Fetching Approved Events with filter: ${JSON.stringify(filter)}`,
+  );
 
   let dbQuery = Event.find(filter).populate({
     path: "organizer",
     select: "name image location",
   });
 
+  // 4. Sorting logic
   if (query.sort) {
     const sortBy = query.sort.split(",").join(" ");
     dbQuery = dbQuery.sort(sortBy);
@@ -247,6 +257,7 @@ export const getAllEvents = async (query: any) => {
     dbQuery = dbQuery.sort("-createdAt");
   }
 
+  // 5. Pagination
   const page = Number(query.page) || 1;
   const limit = Number(query.limit) || 20;
   const skip = (page - 1) * limit;

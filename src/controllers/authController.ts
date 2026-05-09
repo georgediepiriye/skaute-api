@@ -97,6 +97,7 @@ export const getMe = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         image: user.image,
+        role: user.role,
       },
     });
   } catch (error: any) {

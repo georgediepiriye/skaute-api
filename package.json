@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec tsx --env-file=.env src/server.ts",
     "build": "tsc",
-    "seed": "ts-node src/scripts/seedData.ts",
+    "seed": "tsx --env-file=.env src/scripts/seedData.ts",
     "start": "node dist/server.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest --runInBand",
     "test:watch": "jest --watchAll",

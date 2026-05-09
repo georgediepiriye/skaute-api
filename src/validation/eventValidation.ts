@@ -55,6 +55,12 @@ const eventBodyShape = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  communityLink: z
+    .string()
+    .url("Invalid Community Link")
+    .nullable()
+    .optional()
+    .or(z.literal("")),
   externalTicketLink: z
     .string()
     .url("Invalid External Ticket URL")

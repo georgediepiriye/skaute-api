@@ -9,6 +9,7 @@ import eventRouter from "./routes/eventRoutes.js";
 import hotspotRouter from "./routes/hotspotRoutes.js";
 import ticketRouter from "./routes/ticketRoutes.js";
 import userRouter from "./routes/userRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
 import httpStatus from "http-status";
 import AppError from "./utils/AppError.js";
 import * as webhookController from "./controllers/webhookController.js";
@@ -77,6 +78,7 @@ app.use("/v1/events", eventRouter);
 app.use("/v1/hotspots", hotspotRouter);
 app.use("/v1/tickets", ticketRouter);
 app.use("/v1/users", userRouter);
+app.use("/v1/admin", adminRouter);
 
 app.all(/^\/.*$/, (_, __, next) => {
   next(

@@ -22,6 +22,7 @@ export interface IEvent extends Document {
   endDate: Date;
   type: KivoType;
   status: "casual" | "verified" | "featured";
+  approvalStatus: "pending" | "approved" | "rejected";
 
   // Format Logic
   eventFormat: "physical" | "online" | "hybrid";
@@ -61,6 +62,7 @@ export interface IEvent extends Document {
   // Links & CTA
   joinLink?: string;
   meetingLink?: string;
+  communityLink?: string;
   externalTicketLink?: string;
 
   attendees: number;
@@ -108,6 +110,12 @@ const eventSchema = new Schema<IEvent>(
       type: String,
       enum: ["casual", "verified", "featured"],
       default: "casual",
+    },
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
     },
     category: {
       type: String,
@@ -169,6 +177,7 @@ const eventSchema = new Schema<IEvent>(
     // Metadata & Engagement
     joinLink: { type: String, trim: true },
     meetingLink: { type: String, trim: true },
+    communityLink: { type: String, trim: true },
     externalTicketLink: { type: String, trim: true },
     attendees: { type: Number, default: 0 },
     participantImages: [{ type: String }],

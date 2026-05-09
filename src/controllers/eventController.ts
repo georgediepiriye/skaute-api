@@ -24,7 +24,7 @@ export const createEvent = async (
         ? JSON.parse(req.body.eventData)
         : { ...req.body };
 
-    let imageUrl = "https://picsum.photos/seed/kivo/1200/800"; // Fallback
+    let imageUrl = "https://picsum.photos/seed/kivo/1200/800";
 
     // 2. Handle Image Upload to Cloudinary
     if (req.file) {
