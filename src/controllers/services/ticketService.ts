@@ -430,7 +430,10 @@ export const processTicketCheckIn = async (
 };
 
 export const verifyAndFulfillOrder = async (reference: string) => {
-  const order = await Order.findOne({ paymentReference: reference });
+  const order = await Order.findOne({ paymentReference: reference }).populate(
+    "event",
+    "title",
+  );
 
   if (!order) {
     throw new AppError(httpStatus.NOT_FOUND, "Transaction not found");

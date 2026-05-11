@@ -18,6 +18,7 @@ const router = Router();
 router.get("/", eventController.getAllEvents);
 router.get("/nearby", eventController.getNearbyEvents);
 router.get("/:id", eventController.getEvent);
+router.get("/slug/:slug", eventController.getEventBySlug);
 
 // --- PROTECTED ROUTES GATE ---
 // Everything below this line now requires a valid login cookie
@@ -46,6 +47,8 @@ router.delete(
   validate(removeCoOrganizerSchema),
   eventController.removeCoOrganizer,
 );
+
+router.get("/slug/:slug", eventController.getEventBySlug);
 
 // router.patch("/:id", eventController.updateEvent);
 // router.delete("/:id", eventController.deleteEvent);

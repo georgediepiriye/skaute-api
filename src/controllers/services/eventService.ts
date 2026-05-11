@@ -222,10 +222,15 @@ export const generateEventInstances = async (parentEvent: IEvent) => {
   }
 };
 
+/**
+ * Kivo Discovery Engine: getAllEvents
+ * Handles additive priority sorting, location-based discovery in Port Harcourt,
+ * and precise date/time filtering for live and upcoming events.
+ */
 export const getAllEvents = async (query: any) => {
   const queryObj = { ...query };
 
-  // 1. Add timeStatus to excluded fields so it doesn't break the direct Mongoose match
+  // Fields to exclude from direct object matching
   const excludedFields = [
     "page",
     "sort",
@@ -233,110 +238,122 @@ export const getAllEvents = async (query: any) => {
     "fields",
     "dateFilter",
     "timeStatus",
+    "startDate[lte]",
+    "endDate[gte]",
+    "lat",
+    "lng",
   ];
   excludedFields.forEach((el) => delete queryObj[el]);
 
-  if (queryObj.category && typeof queryObj.category === "string") {
-    if (queryObj.category.includes(",")) {
-      const categories = queryObj.category.split(",");
-      queryObj.category = { $in: categories };
-    }
-  }
-
-  // 2. Force filter for approved and active events
+  // Initial filter with base business rules
   let filter: any = {
     ...queryObj,
     approvalStatus: "approved",
     isCancelled: false,
   };
 
+  // 1. TEXT SEARCH & MULTI-CATEGORY
   if (filter.title) filter.title = { $regex: filter.title, $options: "i" };
+  if (queryObj.category?.includes(",")) {
+    filter.category = { $in: queryObj.category.split(",") };
+  }
 
   const now = new Date();
 
-  // 3. Handle Date Filtering (Today, Tomorrow, Weekend)
-  if (query.dateFilter) {
-    const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+  // 2. REFINED BOOSTING & PRIORITY LOGIC
+  // If explicitly searching for boosted, check expiry.
+  // Otherwise, we let the Sort Engine handle the visibility.
+  if (query.isBoosted === "true") {
+    filter.isBoosted = true;
+    filter.boostExpiry = { $gt: now };
+  }
 
-    if (query.dateFilter === "today") {
-      const endOfToday = new Date(now.setHours(23, 59, 59, 999));
-      filter.startDate = { $lte: endOfToday };
-      filter.endDate = { $gte: startOfToday };
-    } else if (query.dateFilter === "tomorrow") {
-      const startOfTomorrow = new Date(startOfToday);
-      startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
-      const endOfTomorrow = new Date(startOfTomorrow);
-      endOfTomorrow.setHours(23, 59, 59, 999);
+  // 3. TIME STATUS LOGIC (Live vs Upcoming)
+  if (query.timeStatus === "live") {
+    filter.startDate = { $lte: now };
+    filter.endDate = { $gte: now };
+  } else if (query.timeStatus === "upcoming") {
+    filter.startDate = { $gt: now };
+  }
 
-      filter.startDate = { $lte: endOfTomorrow };
-      filter.endDate = { $gte: startOfTomorrow };
-    } else if (query.dateFilter === "weekend") {
-      const day = now.getDay();
-      const daysUntilNextFriday = (5 - day + 7) % 7 || 7;
-      const nextFriday = new Date(startOfToday);
-      nextFriday.setDate(nextFriday.getDate() + daysUntilNextFriday);
+  // 4. DATE RANGE LOGIC
+  if (query["startDate[lte]"] || query["endDate[gte]"]) {
+    const dateQuery: any = {};
+    if (query["startDate[lte]"])
+      dateQuery.$lte = new Date(query["startDate[lte]"]);
 
-      const nextSunday = new Date(nextFriday);
-      nextSunday.setDate(nextSunday.getDate() + 2);
-      nextSunday.setHours(23, 59, 59, 999);
-
-      filter.startDate = { $lte: nextSunday };
-      filter.endDate = { $gte: nextFriday };
+    if (query["endDate[gte]"]) {
+      // Corrected logic: Ensure we don't overwrite filter.startDate if it exists
+      filter.startDate = { ...(filter.startDate || {}), ...dateQuery };
+      filter.endDate = {
+        ...(filter.endDate || {}),
+        $gte: new Date(query["endDate[gte]"]),
+      };
     }
   }
 
-  // 4. Handle Live vs Upcoming Status
-  // This uses spread logic to avoid overwriting dateFilter if both are selected
-  if (query.timeStatus) {
-    const currentTime = new Date();
-
-    if (query.timeStatus === "live") {
-      // "Live Now" = Started in the past AND hasn't ended yet
-      filter.startDate = { ...filter.startDate, $lte: currentTime };
-      filter.endDate = { ...filter.endDate, $gte: currentTime };
-    } else if (query.timeStatus === "upcoming") {
-      // "Upcoming" = Starts in the future
-      filter.startDate = { ...filter.startDate, $gt: currentTime };
+  // 5. PHYSICAL VS VIRTUAL LOGIC
+  if (query.eventFormat) {
+    if (query.eventFormat === "online") {
+      filter.eventFormat = { $in: ["online", "hybrid"] };
+    } else if (query.eventFormat === "physical") {
+      filter.eventFormat = { $in: ["physical", "hybrid"] };
     }
   }
-  // 5. Default Fallback
-  // If no date or status filter is picked, show everything that hasn't ended yet
-  else if (!query.dateFilter) {
-    filter.endDate = { $gte: new Date() };
+
+  // 6. GEO-SPATIAL LOGIC (Focusing on Port Harcourt radius)
+  if (query.lat && query.lng) {
+    filter.location = {
+      $geoWithin: {
+        $centerSphere: [
+          [parseFloat(query.lng), parseFloat(query.lat)],
+          50 / 6378.1, // 50km radius
+        ],
+      },
+    };
   }
 
-  // 6. Handle Price
-  if (query.price === "free") {
-    filter.price = 0;
-  }
-
-  // Execute Query
+  // 7. BUILD QUERY
   let dbQuery = Event.find(filter).populate({
     path: "organizer",
-    select: "name image location",
+    select: "name image location role",
   });
 
-  // Sorting
+  /**
+   * 8. THE DISCOVERY ENGINE (The Fix)
+   * We want Priority 5 to be the absolute master.
+   * Boosted status is the secondary driver.
+   */
   if (query.sort) {
-    const sortBy = query.sort.split(",").join(" ");
-    dbQuery = dbQuery.sort(sortBy);
+    // Allows API consumers to override if they specifically ask for "newest"
+    dbQuery = dbQuery.sort(query.sort.split(",").join(" "));
   } else {
-    dbQuery = dbQuery.sort("-createdAt");
+    dbQuery = dbQuery.sort({
+      priorityLevel: -1, // 1. Absolute highest rank (5 > 3 > 1)
+      isBoosted: -1, // 2. Paid boosts within those ranks
+      startDate: 1, // 3. Happening soonest
+      createdAt: -1, // 4. Newest entries
+    });
   }
 
-  // Pagination
+  // 9. PAGINATION & EXECUTION
   const page = Number(query.page) || 1;
   const limit = Number(query.limit) || 20;
   const skip = (page - 1) * limit;
 
-  dbQuery = dbQuery.skip(skip).limit(limit);
-
+  // Run total count and data fetch in parallel for performance
   const [events, total] = await Promise.all([
-    dbQuery,
+    dbQuery.skip(skip).limit(limit).lean(),
     Event.countDocuments(filter),
   ]);
 
-  return { events, total, page, limit };
+  return {
+    events,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
 };
 
 export const findNearbyEvents = async (
@@ -564,4 +581,15 @@ export const removePartnerFromEvent = async (
   logger.info(`Partner Removed: EventID=${eventId} PartnerID=${partnerId}`);
 
   return updatedEvent;
+};
+
+export const getEventBySlug = async (slug: string) => {
+  const event = await Event.findOne({
+    slug: slug,
+  }).populate({
+    path: "organizer",
+    select: "name image location",
+  });
+
+  return event;
 };

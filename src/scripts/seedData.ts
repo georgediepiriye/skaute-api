@@ -9,7 +9,6 @@ import { EVENT_CATEGORIES, EVENT_TYPES } from "../lib/constants.js";
 
 dotenv.config();
 
-// Strictly use these images for all events
 const KIVO_EVENT_IMAGES = [
   "https://res.cloudinary.com/dzhfiblg7/image/upload/v1778009848/kivo_events/bqsjv88hteupsshuufo0.jpg",
   "https://res.cloudinary.com/dzhfiblg7/image/upload/v1778009787/kivo_events/ewwcfo3qgng6jik4oc5a.jpg",
@@ -35,7 +34,6 @@ const PH_NEIGHBORHOODS = [
   "Ada George",
   "Rumuokoro",
 ];
-
 const PH_BOUNDS = { latMin: 4.75, latMax: 4.9, lngMin: 6.95, lngMax: 7.1 };
 
 const TIER_TEMPLATES = [
@@ -56,10 +54,8 @@ async function seedDatabase() {
     await Event.deleteMany({});
     await User.deleteMany({});
 
-    // --- 1. SEED USERS ---
     console.log("👤 Seeding users...");
     const hashedPassword = await bcrypt.hash("password123", 10);
-
     const userBatch = [
       {
         name: "Kivo Admin",
@@ -76,39 +72,50 @@ async function seedDatabase() {
         image: faker.image.avatar(),
       })),
     ];
-
     const createdUsers = await User.insertMany(userBatch);
-    console.log(`✅ Created ${createdUsers.length} users.`);
 
-    // --- 2. SEED EVENTS ---
     const categoryKeys = Object.keys(EVENT_CATEGORIES);
     const typeKeys = Object.keys(EVENT_TYPES);
 
-    console.log("🎲 Generating 100 high-quality events...");
+    console.log(
+      "🎲 Generating 100 high-quality events with Additive Priority...",
+    );
 
     const eventBatch = Array.from({ length: 100 }).map((_, i) => {
       const host = faker.helpers.arrayElement(createdUsers);
-      const eventStatus = faker.helpers.arrayElement([
-        "casual",
-        "verified",
-        "featured",
-      ]);
+
+      // --- ADDITIVE STATUS & PRIORITY LOGIC ---
+      const isVerified = Math.random() > 0.7; // 30% Verified
+      const isFeatured = Math.random() > 0.85; // 15% Featured
+      const isBoosted = Math.random() > 0.9; // 10% Boosted
+
+      const status = ["casual"];
+      if (isVerified) status.push("verified");
+      if (isFeatured) status.push("featured");
+
+      // Calculate Priority Level
+      // 1 (Verified) + 2 (Featured) + 4 (Boosted)
+      let priorityLevel = 0;
+      if (isVerified) priorityLevel += 1;
+      if (isFeatured) priorityLevel += 2;
+      if (isBoosted) priorityLevel += 4;
 
       const formatRoll = Math.random();
-      let eventFormat: "physical" | "hybrid" | "online";
-      if (formatRoll < 0.75) eventFormat = "physical";
-      else if (formatRoll < 0.9) eventFormat = "hybrid";
-      else eventFormat = "online";
+      let eventFormat: "physical" | "hybrid" | "online" =
+        formatRoll < 0.75 ? "physical" : formatRoll < 0.9 ? "hybrid" : "online";
 
       const isOnline = eventFormat === "online" || eventFormat === "hybrid";
       const hasPhysicalPresence =
         eventFormat === "physical" || eventFormat === "hybrid";
-
       const now = new Date();
       const ONE_DAY = 24 * 60 * 60 * 1000;
-      let startDate: Date;
-      let endDate: Date;
 
+      const createdAt =
+        Math.random() > 0.8
+          ? faker.date.recent({ days: 1 })
+          : faker.date.past({ years: 0.1 });
+
+      let startDate, endDate;
       if (Math.random() < 0.3) {
         startDate = new Date(now.getTime() - ONE_DAY);
         endDate = new Date(now.getTime() + 3 * ONE_DAY);
@@ -122,44 +129,40 @@ async function seedDatabase() {
         );
       }
 
-      // --- NEW TRENDING LOGIC ---
-      // Featured events should look more popular
-      const isFeatured = eventStatus === "featured";
       const attendees = faker.number.int({
         min: isFeatured ? 50 : 5,
         max: isFeatured ? 500 : 150,
       });
-      const views = faker.number.int({
-        min: attendees * 2,
-        max: attendees * 10,
-      });
-      const likes = faker.number.int({
-        min: Math.floor(attendees / 4),
-        max: attendees,
-      });
 
-      const eventData: Record<string, any> = {
+      const eventData: any = {
         title: `${faker.commerce.productAdjective()} ${faker.helpers.arrayElement(["Summit", "Party", "Festival", "Workshop", "Hangout"])}`,
+        slug: faker.helpers.slugify(
+          `${faker.commerce.productAdjective()}-${i}-${Date.now()}`,
+        ),
         description: faker.commerce.productDescription(),
         category: faker.helpers.arrayElement(categoryKeys),
         type: faker.helpers.arrayElement(typeKeys),
-        status: eventStatus,
-        approvalStatus: Math.random() > 0.3 ? "approved" : "pending",
+        status, // Now an array
+        priorityLevel, // Summed score
+        isBoosted,
+        boostExpiry: isBoosted ? faker.date.soon({ days: 7 }) : undefined,
+        approvalStatus: "approved",
         eventFormat,
         isOnline,
         startDate,
         endDate,
+        createdAt,
         image: faker.helpers.arrayElement(KIVO_EVENT_IMAGES),
         organizer: host._id,
         organizerType: host.role === "organizer" ? "business" : "individual",
         isPublic: true,
         allowAnonymous: faker.datatype.boolean(),
-
-        // Engagement Data
         attendees,
-        views,
-        likes,
-
+        views: faker.number.int({ min: attendees * 2, max: attendees * 10 }),
+        likes: faker.number.int({
+          min: Math.floor(attendees / 4),
+          max: attendees,
+        }),
         participantImages: Array.from({ length: 5 }).map(() =>
           faker.image.avatar(),
         ),
@@ -174,7 +177,6 @@ async function seedDatabase() {
         isFree: true,
       };
 
-      // Ticketing Logic
       const ticketingType = faker.helpers.arrayElement([
         "none",
         "internal",
@@ -184,22 +186,30 @@ async function seedDatabase() {
 
       if (ticketingType === "internal") {
         eventData.isFree = Math.random() > 0.4;
-        if (!eventData.isFree) {
-          const template = faker.helpers.arrayElement(TIER_TEMPLATES);
-          const basePrice = faker.number.int({ min: 2500, max: 10000 });
-          eventData.ticketTiers = template.map((name, idx) => ({
+        const template = faker.helpers.arrayElement(TIER_TEMPLATES);
+        const basePrice = eventData.isFree
+          ? 0
+          : faker.number.int({ min: 2500, max: 10000 });
+
+        eventData.ticketTiers = template.map((name, idx) => {
+          const capacity = faker.number.int({ min: 50, max: 200 });
+          const sold =
+            Math.random() > 0.9
+              ? Math.floor(capacity * 0.9)
+              : Math.floor(attendees / template.length);
+          return {
             name,
             price: basePrice * (idx + 1),
-            capacity: 100,
-            sold: Math.floor(attendees / template.length), // sync sold tickets with attendees
-          }));
-        }
+            capacity,
+            sold,
+            salesEnd: faker.date.soon({ days: 2, refDate: startDate }),
+          };
+        });
       } else if (ticketingType === "external") {
         eventData.isFree = false;
         eventData.externalTicketLink = faker.internet.url();
       }
 
-      // Location Logic - Port Harcourt
       if (hasPhysicalPresence) {
         eventData.location = {
           type: "Point",
@@ -218,9 +228,7 @@ async function seedDatabase() {
         };
       }
 
-      if (isOnline) {
-        eventData.meetingLink = faker.internet.url();
-      }
+      if (isOnline) eventData.meetingLink = faker.internet.url();
 
       return eventData;
     });
@@ -229,11 +237,8 @@ async function seedDatabase() {
 
     console.log("🚀 Kivo Database Fully Seeded!");
     console.log("----------------------------------");
-    console.log(`Events: 100 (Randomized Views, Likes & Attendees)`);
-    console.log(
-      `Engagement: Featured events have boosted metrics for trending logic`,
-    );
     console.log(`Location: Port Harcourt, Rivers State`);
+    console.log(`Priority Scaling: Additive (0-7 scale)`);
     console.log("----------------------------------");
 
     process.exit(0);

@@ -260,3 +260,27 @@ export const removeCoOrganizer = async (
     next(error);
   }
 };
+
+export const getEventBySlug = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const event = await eventService.getEventBySlug(req.params.slug as string);
+
+    if (!event) {
+      return res.status(httpStatus.NOT_FOUND).json({
+        status: "fail",
+        message: "No event found with that custom link",
+      });
+    }
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { event },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

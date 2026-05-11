@@ -7,6 +7,14 @@ const eventBodyShape = z.object({
     .string()
     .min(5, "Title must be at least 5 characters")
     .max(100, "Title cannot exceed 100 characters"),
+  slug: z
+    .string()
+    .min(3, "Custom link must be at least 3 characters")
+    .max(50, "Custom link is too long")
+    .regex(
+      /^[a-z0-9-]+$/,
+      "Custom link can only contain letters, numbers, and hyphens",
+    ),
   description: z
     .string()
     .min(20, "Please provide a more detailed description (min 20 chars)"),
