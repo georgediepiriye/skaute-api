@@ -19,7 +19,7 @@ export const sendTicketEmail = async (
           
           <div style="margin: 20px 0; background: #f9f9f9; padding: 15px; border-radius: 8px;">
             <img 
-              src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ticket.ticketCode}" 
+              src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${ticket.checkInCode}" 
               alt="QR Code" 
               style="width: 150px; height: 150px;" 
             />
