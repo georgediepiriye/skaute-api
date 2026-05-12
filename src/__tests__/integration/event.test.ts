@@ -34,8 +34,12 @@ describe("Event Routes", () => {
   });
 
   describe("POST /v1/events", () => {
+    beforeEach(async () => {
+      await Event.deleteMany({});
+    });
     const validEvent = {
       title: "Kivo Rooftop Vibe",
+      slug: "kivo-rooftop-vibe",
       description:
         "Networking and chilled vibes in the heart of Port Harcourt. Come through!",
       eventFormat: "physical",
@@ -104,6 +108,7 @@ describe("Event Routes", () => {
       // Create a mock event in DB
       await Event.create({
         title: "Upcoming Move",
+        slug: "upcoming-move",
         description: "Testing the list view of the events route.",
         eventFormat: "physical",
         type: "activity",
@@ -115,14 +120,28 @@ describe("Event Routes", () => {
         organizer: new mongoose.Types.ObjectId(),
         location: {
           type: "Point",
-          coordinates: [7.0085, 4.8156],
+          coordinates: [7.0085, 4.8156], // Port Harcourt
           address: "GRA Phase 2, Port Harcourt",
         },
+        // --- Ticketing Logic ---
+        ticketingType: "internal",
+        ticketTiers: [
+          {
+            name: "Big Boy",
+            price: 4000,
+            capacity: 500,
+            sold: 0,
+            salesEnd: new Date(Date.now() + 86400000),
+          },
+        ],
+        totalCapacity: 500,
+        ticketsSold: 0,
+
+        communityLink: "https://chat.whatsapp.com/KivoTest",
         meetingLink: "https://zoom.us/j/123",
       });
 
       const res = await request(app).get("/v1/events");
-      console.log(res.body, "RES__");
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.data.events)).toBe(true);
