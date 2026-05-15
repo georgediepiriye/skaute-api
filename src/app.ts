@@ -29,26 +29,43 @@ const stream = {
   write: (message: string) => logger.http(message.trim()),
 };
 
-// Use 'combined' for production (includes IP/User Agent), 'dev' for local
 app.use(morgan(config.env === "production" ? "combined" : "dev", { stream }));
 
 app.use(helmet());
 app.use(cookieParser());
 
+/**
+ * PRODUCTION-PROOF CORS ARCHITECTURE
+ */
 const corsOptions = {
   origin: config.clientUrl,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Cookie",
+  ],
+  exposedHeaders: ["Set-Cookie"],
 };
 
+// Apply standard global CORS implementation
 app.use(cors(corsOptions));
-app.options(/^\/.*$/, cors(corsOptions));
+
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    cors(corsOptions)(req, res, next);
+    return;
+  }
+  next();
+});
 
 app.use(passport.initialize());
 
 /**
- * 1. PAYSTACK WEBHOOK
+ * 1. PAYSTACK WEBHOOK (Must be placed before json parsing)
  */
 app.post(
   "/v1/webhooks/paystack",
