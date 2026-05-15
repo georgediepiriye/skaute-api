@@ -209,7 +209,6 @@ export const getManagementDashboardData = async (
     next(error);
   }
 };
-
 export const addCoOrganizer = async (
   req: Request,
   res: Response,
@@ -217,12 +216,13 @@ export const addCoOrganizer = async (
 ) => {
   try {
     const eventId = req.params.eventId as string;
-    const { email } = req.body;
+    const { email, permissions } = req.body;
     const user = (req as any).user;
 
     const updatedEvent = await eventService.addPartnerToEvent(
       eventId,
       email,
+      permissions,
       user._id.toString(),
     );
 
@@ -386,6 +386,32 @@ export const toggleSoldOutStatus = async (
       status: "success",
       message: isNowSoldOut ? "Marked as Sold Out" : "Sales resumed",
       data: updatedEvent,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateCoOrganizerPermissions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id: eventId } = req.params;
+    const { coOrganizerId, permissions } = req.body;
+    const user = (req as any).user as IUser;
+
+    const updatedEvent = await eventService.updateCoOrganizerPermissions(
+      eventId as string,
+      coOrganizerId,
+      permissions,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { event: updatedEvent },
     });
   } catch (error) {
     next(error);

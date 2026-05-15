@@ -145,7 +145,7 @@ async function seedDatabase() {
         status,
         priorityLevel,
         isBoosted,
-        isSoldOut, // MANUALLY TOGGLED
+        isSoldOut,
         boostExpiry: isBoosted ? faker.date.soon({ days: 7 }) : undefined,
         approvalStatus: "approved",
         eventFormat,

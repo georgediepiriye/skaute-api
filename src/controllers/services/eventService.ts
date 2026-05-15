@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { Event, IEvent } from "../../models/Event.js";
+import { CoOrganizerPermission, Event, IEvent } from "../../models/Event.js";
 import { Ticket } from "../../models/Ticket.js";
 import { User } from "../../models/User.js";
 import AppError from "../../utils/AppError.js";
@@ -402,17 +402,25 @@ export const getManagementDashboardData = async (
   page: number = 1,
   limit: number = 20,
 ) => {
-  const event = await Event.findById(eventId).populate(
-    "coOrganizers",
-    "name image email",
-  );
+  // FIXED: Deep populate the nested user reference inside the coOrganizers array object
+  const event = await Event.findById(eventId).populate({
+    path: "coOrganizers.user",
+    select: "name image email",
+  });
+
   if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
 
   // Auth Check
   const isOwner = event.organizer.toString() === userId;
-  const isCoOrg = event.coOrganizers?.some(
-    (coOrg: any) => coOrg._id.toString() === userId,
-  );
+
+  // FIXED: Inspect the nested user ID inside the sub-document structure
+  const isCoOrg = event.coOrganizers?.some((coOrg: any) => {
+    const coOrgUserId = coOrg.user?._id
+      ? coOrg.user._id.toString()
+      : coOrg.user?.toString();
+    return coOrgUserId === userId;
+  });
+
   if (!isOwner && !isCoOrg)
     throw new AppError(httpStatus.FORBIDDEN, "Unauthorized");
 
@@ -468,11 +476,10 @@ export const getManagementDashboardData = async (
   });
 
   // 3. Paginated Attendees (REMOVED STATUS FILTER)
-  // We want to see EVERYTHING here: valid, used, refunded, transferred, cancelled.
   const skip = (page - 1) * limit;
 
   const [attendees, totalCount] = await Promise.all([
-    Ticket.find({ event: eventId }) // Removed status filter to show all
+    Ticket.find({ event: eventId })
       .sort("-createdAt")
       .skip(skip)
       .limit(limit)
@@ -503,6 +510,7 @@ export const getManagementDashboardData = async (
 export const addPartnerToEvent = async (
   eventId: string,
   email: string,
+  permissions: string[],
   organizerId: string,
 ) => {
   const event = await Event.findById(eventId);
@@ -527,7 +535,7 @@ export const addPartnerToEvent = async (
     throw new AppError(httpStatus.BAD_REQUEST, "You are already the host");
   }
 
-  // UPDATED: Check the 'user' property inside the co-organizer object
+  // Safe verification: Search via the updated object property structural lookup key (.user)
   const alreadyPartner = event.coOrganizers?.some(
     (co: any) => co.user.toString() === userToAdd._id.toString(),
   );
@@ -539,26 +547,19 @@ export const addPartnerToEvent = async (
     );
   }
 
-  // UPDATED: Push an OBJECT instead of just the ID
   const updatedEvent = await Event.findByIdAndUpdate(
     eventId,
     {
       $push: {
         coOrganizers: {
           user: userToAdd._id,
-          permissions: {
-            // These defaults come from your schema, but you can be explicit
-            canViewRevenue: false,
-            canViewAttendees: true,
-            canRefundTickets: false,
-            canBroadcast: false,
-            canEditEvent: false,
-          },
+          permissions: permissions,
+          assignedAt: new Date(),
         },
       },
     },
     { new: true, runValidators: true },
-  );
+  ).populate("coOrganizers.user", "name email image");
 
   return updatedEvent;
 };
@@ -573,7 +574,6 @@ export const removePartnerFromEvent = async (
   if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
 
   // 2. Security: Only the MAIN organizer can remove partners
-  // Co-organizers should not be able to remove each other
   if (event.organizer.toString() !== organizerId) {
     throw new AppError(
       httpStatus.FORBIDDEN,
@@ -581,14 +581,22 @@ export const removePartnerFromEvent = async (
     );
   }
 
-  // 3. Update the event using $pull
   const updatedEvent = await Event.findByIdAndUpdate(
     eventId,
-    { $pull: { coOrganizers: partnerId } },
+    {
+      $pull: {
+        coOrganizers: { user: partnerId },
+      },
+    },
     { new: true, runValidators: true },
-  ).populate("coOrganizers", "name image email");
+  ).populate("coOrganizers.user", "name image email");
 
-  logger.info(`Partner Removed: EventID=${eventId} PartnerID=${partnerId}`);
+  if (!updatedEvent) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      "Failed to update event tracking configurations",
+    );
+  }
 
   return updatedEvent;
 };
@@ -815,4 +823,51 @@ export const toggleEventSoldOut = async (
   await event.save();
 
   return event;
+};
+
+export const updateCoOrganizerPermissions = async (
+  eventId: string,
+  coOrganizerId: string,
+  permissions: CoOrganizerPermission[],
+  userId: string,
+) => {
+  // 1. Fetch event framework explicitly
+  const event = await Event.findById(eventId);
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event / Move not found");
+  }
+
+  // 2. Main Organizer ownership validation
+  if (event.organizer.toString() !== userId) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "You are not authorized to manage partner permissions for this event",
+    );
+  }
+
+  // 3. Atomically update the internal subdocument nested permissions array array
+  const updatedEvent = await Event.findOneAndUpdate(
+    {
+      _id: eventId,
+      "coOrganizers.user": coOrganizerId,
+    },
+    {
+      $set: {
+        "coOrganizers.$.permissions": permissions,
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  ).populate("coOrganizers.user", "name email image");
+
+  if (!updatedEvent) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      "Target collaborator profile not linked to this event configuration",
+    );
+  }
+
+  return updatedEvent;
 };

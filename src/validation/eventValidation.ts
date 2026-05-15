@@ -188,6 +188,17 @@ export const addCoOrganizerSchema = z.object({
       .email("Please provide a valid partner email")
       .lowercase()
       .trim(),
+    permissions: z
+      .array(
+        z.enum([
+          "view_revenue",
+          "issue_refunds",
+          "send_broadcasts",
+          "scan_tickets",
+        ]),
+      )
+      .optional()
+      .default(["scan_tickets"]),
   }),
 });
 
@@ -243,6 +254,18 @@ export const validateDiscountValidation = z.object({
       .trim()
       .transform((val) => val.toUpperCase()), // Auto-normalize input
     tierName: z.string().min(1, "Ticket tier name is required").trim(),
+  }),
+});
+
+export const updateCoOrganizerPermissionsValidation = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID format"),
+  }),
+  body: z.object({
+    coOrganizerId: z
+      .string()
+      .regex(/^[0-9a-fA-F]{24}$/, "Invalid Co-Organizer User ID format"),
+    permissions: z.array(z.string()).nonempty("cannot be completely empty"),
   }),
 });
 

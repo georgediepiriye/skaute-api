@@ -7,6 +7,12 @@ import {
 } from "../lib/constants.js";
 import { discountSchema, IDiscount } from "./Discount.js";
 
+export type CoOrganizerPermission =
+  | "view_revenue"
+  | "issue_refunds"
+  | "send_broadcasts"
+  | "scan_tickets";
+
 interface ITicketTier {
   name: string;
   price: number;
@@ -15,6 +21,12 @@ interface ITicketTier {
   description?: string;
   salesEnd?: Date;
   isSoldOut?: boolean;
+}
+
+export interface ICoOrganizer {
+  user: mongoose.Types.ObjectId;
+  permissions: CoOrganizerPermission[];
+  assignedAt: Date;
 }
 
 export interface IEvent extends Document {
@@ -43,7 +55,7 @@ export interface IEvent extends Document {
 
   image: string;
   organizer: mongoose.Types.ObjectId;
-  coOrganizers: mongoose.Types.ObjectId[];
+  coOrganizers: ICoOrganizer[];
   organizerType: "individual" | "business";
 
   isFree: boolean;
@@ -92,6 +104,26 @@ const ticketTierSchema = new Schema<ITicketTier>({
   isSoldOut: { type: Boolean, default: false },
 });
 
+const coOrganizerSchema = new Schema<ICoOrganizer>(
+  {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    permissions: {
+      type: [String],
+      enum: ["view_revenue", "issue_refunds", "send_broadcasts", "scan_tickets"],
+      default: ["scan_tickets"],
+    },
+    assignedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const eventSchema = new Schema<IEvent>(
   {
     title: {
@@ -124,7 +156,7 @@ const eventSchema = new Schema<IEvent>(
       default: "activity",
     },
     status: {
-      type: [String], // Array type for multiple statuses
+      type: [String],
       enum: ["casual", "verified", "featured"],
       default: ["casual"],
     },
@@ -202,7 +234,7 @@ const eventSchema = new Schema<IEvent>(
     likes: { type: Number, default: 0, index: true },
     participantImages: [{ type: String }],
     organizer: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    coOrganizers: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    coOrganizers: [coOrganizerSchema],
     organizerType: {
       type: String,
       enum: ["individual", "business"],
@@ -274,14 +306,12 @@ eventSchema.pre<IEvent>("save", async function (this: IEvent) {
   ) {
     let score = 0;
 
-    // Add status-based weights
     if (this.status.includes("verified")) score += 1;
     if (this.status.includes("featured")) score += 2;
 
-    // Add boosting weight if active
     const now = new Date();
     if (this.isBoosted && this.boostExpiry && this.boostExpiry > now) {
-      score += 4; // Higher weight so boosted always tops Featured+Verified (which is 3)
+      score += 4;
     }
 
     this.priorityLevel = score;
@@ -325,7 +355,7 @@ eventSchema.index({ location: "2dsphere" }, { sparse: true });
 eventSchema.index({ "location.neighborhood": 1 }, { sparse: true });
 eventSchema.index({ "recurrence.parentId": 1 });
 eventSchema.index({ startDate: 1 });
-eventSchema.index({ priorityLevel: -1 }); // Optimized for discovery sorting
+eventSchema.index({ priorityLevel: -1 });
 
 export const Event =
   mongoose.models.Event || mongoose.model<IEvent>("Event", eventSchema);

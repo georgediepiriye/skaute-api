@@ -9,8 +9,10 @@ export const getUserProfile = async (userId: string) => {
   // Fetch all three data sets in parallel
   const [user, organizedEvents, tickets] = await Promise.all([
     User.findById(userId).select("-password").lean(),
+
+    // FIXED: Using dot notation to query inside the sub-document array
     Event.find({
-      $or: [{ organizer: userId }, { coOrganizers: userId }],
+      $or: [{ organizer: userId }, { "coOrganizers.user": userId }],
     }).sort("-startDate"),
 
     Ticket.find({ owner: userId })

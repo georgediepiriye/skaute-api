@@ -11,6 +11,7 @@ import {
   createDiscountValidation,
   deleteDiscountValidation,
   validateDiscountValidation,
+  updateCoOrganizerPermissionsValidation,
 } from "../validation/eventValidation.js";
 import multer from "multer";
 const upload = multer({ storage: multer.memoryStorage() });
@@ -58,6 +59,12 @@ router.delete(
 
 router.get("/slug/:slug", eventController.getEventBySlug);
 
+router.patch(
+  "/:id/update-coorganizer-permissions",
+  validate(updateCoOrganizerPermissionsValidation),
+  eventController.updateCoOrganizerPermissions,
+);
+
 // --- DISCOUNT ROUTES ---
 router.patch(
   "/:id/discounts",
@@ -73,7 +80,6 @@ router.delete(
 
 router.patch("/:id/toggle-sold-out", eventController.toggleSoldOutStatus);
 
-// router.patch("/:id", eventController.updateEvent);
 // router.delete("/:id", eventController.deleteEvent);
 
 export default router;
