@@ -403,10 +403,8 @@ export const processTicketCheckIn = async (
   eventId: string,
   scannerId: string,
 ) => {
-  // 1. Optimization: Check Auth and Event in one lean query
-  // We use .lean() because we don't need Mongoose magic for the event check
   const event = await Event.findById(eventId)
-    .select("organizer coOrganizers staff")
+    .select("organizer coOrganizers.user staff.user")
     .lean();
 
   if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
@@ -414,24 +412,22 @@ export const processTicketCheckIn = async (
   const isAuthorized =
     event.organizer.toString() === scannerId ||
     event.coOrganizers?.some(
-      (id: { toString: () => string }) => id.toString() === scannerId,
+      (coOrg: any) => coOrg.user?.toString() === scannerId,
     ) ||
-    event.staff?.some(
-      (s: { user: { toString: () => string } }) =>
-        s.user.toString() === scannerId,
-    );
+    event.staff?.some((s: any) => s.user?.toString() === scannerId);
 
   if (!isAuthorized) {
     throw new AppError(httpStatus.FORBIDDEN, "Not authorized to scan");
   }
 
-  // 2. ATOMIC UPDATE (The Core Reliability Step)
-  // We only update if status is NOT 'used'. This prevents race conditions.
+  const sanitizedCode = checkInCode.trim().toUpperCase();
+
+  // 2. STRICT ATOMIC UPDATE
   const ticket = await Ticket.findOneAndUpdate(
     {
-      checkInCode: checkInCode.trim(), // Sanitize input
+      checkInCode: sanitizedCode,
       event: eventId,
-      status: { $ne: TICKET_STATUS.used },
+      status: TICKET_STATUS.valid,
     },
     {
       $set: {
@@ -446,12 +442,14 @@ export const processTicketCheckIn = async (
     },
   ).populate("event", "title");
 
-  // 3. HANDLING THE "NOT FOUND" or "ALREADY USED" CASE
+  // 3. DETAILED EXCEPTION HANDLING
   if (!ticket) {
     const existingTicket = await Ticket.findOne({
-      checkInCode,
+      checkInCode: sanitizedCode,
       event: eventId,
-    }).lean();
+    })
+      .populate("event", "title")
+      .lean();
 
     if (!existingTicket) {
       throw new AppError(
@@ -461,8 +459,6 @@ export const processTicketCheckIn = async (
     }
 
     // IDEMPOTENCY LOGIC:
-    // If the ticket was ALREADY checked in by THIS scanner in the last 2 minutes,
-    // treat it as a success. This fixes the "Sync Queue Retry" issue.
     const wasJustCheckedInByMe =
       existingTicket.status === TICKET_STATUS.used &&
       existingTicket.checkedInBy?.toString() === scannerId &&
@@ -473,20 +469,40 @@ export const processTicketCheckIn = async (
         guestName: `${existingTicket.buyerInfo.firstName} ${existingTicket.buyerInfo.lastName}`,
         tier: existingTicket.tierName,
         checkedInAt: existingTicket.checkedInAt,
-        alreadyProcessed: true, // Flag for frontend to show a "Already Synced" status
+        eventTitle: existingTicket.event?.title || "Event",
+        alreadyProcessed: true,
       };
     }
 
     if (existingTicket.status === TICKET_STATUS.used) {
       throw new AppError(
         httpStatus.CONFLICT,
-        `Used at ${new Date(existingTicket.checkedInAt).toLocaleTimeString()}`,
+        `Already Used at ${new Date(existingTicket.checkedInAt).toLocaleTimeString()}`,
+      );
+    }
+
+    if (existingTicket.status === TICKET_STATUS.refunded) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Access Denied: Ticket has been Refunded.",
+      );
+    }
+    if (existingTicket.status === TICKET_STATUS.cancelled) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Access Denied: Ticket has been Cancelled.",
+      );
+    }
+    if (existingTicket.status === TICKET_STATUS.transferred) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Access Denied: Ticket has been Transferred.",
       );
     }
 
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Ticket is invalid or cancelled",
+      "Ticket is invalid or inactive.",
     );
   }
 

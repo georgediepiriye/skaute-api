@@ -30,6 +30,7 @@ export const initializeBooking = async (
       discountCode,
     } = req.body;
     const userId = (req.user as any)?.id?.toString() || null;
+    console.log("RESOLVED ACCOUNT ID:", userId);
 
     const result = await ticketService.processBooking(
       userId,
