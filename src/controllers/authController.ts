@@ -3,8 +3,6 @@ import * as authService from "./services/authService.js";
 import { signToken } from "../utils/jwt.js";
 import httpStatus from "http-status";
 import catchAsync from "../utils/catchAsync.js";
-import config from "../config/config.js";
-import jwt from "jsonwebtoken";
 
 export const signup = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -15,17 +13,9 @@ export const signup = catchAsync(
     delete user.password;
     delete user.__v;
 
-    // Retain for fallback, but we will no longer rely on it exclusively in prod
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: config.env === "production",
-      sameSite: config.env === "production" ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
     res.status(httpStatus.CREATED).json({
       status: "success",
-      token, // 💡 CRITICAL: Ensure token is passed explicitly in response payload
+      token,
       data: { user },
     });
   },
@@ -37,16 +27,10 @@ export const login = catchAsync(
     const user = await authService.verifyUser(email, password);
     const token = signToken(user._id.toString(), user.role);
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: config.env === "production",
-      sameSite: config.env === "production" ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
+    // 💡 REMOVED: res.cookie("token", ...) is gone.
     res.status(httpStatus.OK).json({
       status: "success",
-      token, // 💡 CRITICAL: Ensure token is passed explicitly in response payload
+      token,
       data: {
         user: {
           id: user._id,
@@ -68,7 +52,6 @@ export const getMe = async (
   next: NextFunction,
 ) => {
   try {
-    // 1. Grab the user safely attached by your 'protect' middleware
     const currentUser = (req as any).user;
 
     if (!currentUser) {
@@ -78,7 +61,6 @@ export const getMe = async (
       });
     }
 
-    // 2. Clear browser cache headers to stop the 304 Not Modified redirect loop
     res.setHeader(
       "Cache-Control",
       "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -86,7 +68,6 @@ export const getMe = async (
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
 
-    // 3. Match the exact data wrapper structural footprint your frontend expects
     return res.status(httpStatus.OK).json({
       status: "success",
       data: {
@@ -107,12 +88,8 @@ export const getMe = async (
 };
 
 export const logout = async (req: Request, res: Response) => {
-  res.cookie("token", "", {
-    httpOnly: true,
-    secure: config.env === "production",
-    sameSite: config.env === "production" ? "none" : "lax",
-    expires: new Date(0),
+  return res.status(200).json({
+    status: "success",
+    message: "Logged out successfully",
   });
-
-  return res.status(200).json({ message: "Logged out successfully" });
 };

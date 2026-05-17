@@ -2,7 +2,6 @@ import { Router } from "express";
 import * as authController from "../controllers/authController.js";
 import { validate } from "../middleware/validate.js";
 import { signupSchema, loginSchema } from "../validation/authValidation.js";
-// 💡 Import your protect middleware (adjust this relative path to match your folder structure)
 import { protect } from "../middleware/authMiddleware.js";
 import passport from "passport";
 import jwt from "jsonwebtoken";
@@ -14,7 +13,7 @@ router.post("/signup", validate(signupSchema), authController.signup);
 router.post("/login", validate(loginSchema), authController.login);
 router.post("/logout", authController.logout);
 
-// 🔐 Secure this endpoint by passing the protect middleware first!
+// 🔐 Secure endpoint
 router.get("/me", protect, authController.getMe);
 
 // 1. Redirect user to Google
@@ -41,13 +40,6 @@ router.get(
       config.jwt.secret!,
       { expiresIn: "7d" },
     );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
 
     res.redirect(`${config.clientUrl}/auth/callback?token=${token}`);
   },

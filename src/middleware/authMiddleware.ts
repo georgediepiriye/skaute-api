@@ -32,9 +32,6 @@ export const protect = (async (
       }
     }
 
-    // Double check what is being received in your terminal logs
-    console.log("MIDDLEWARE_EXTRACTED_TOKEN:", token);
-
     if (!token || token === "null" || token === "undefined") {
       logger.debug(
         `Protect Middleware: Missing token validation for ${req.originalUrl}`,
