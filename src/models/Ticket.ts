@@ -1,5 +1,4 @@
 import mongoose, { Schema, Document } from "mongoose";
-import crypto from "node:crypto";
 import { TICKET_STATUS, TicketStatus } from "../lib/constants.js";
 
 export interface ITicket extends Document {
@@ -64,15 +63,6 @@ const ticketSchema = new Schema<ITicket>(
     toObject: { virtuals: true },
   },
 );
-
-ticketSchema.pre("validate", async function (this: ITicket) {
-  if (!this.checkInCode) {
-    this.checkInCode = `KIVO-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-  }
-  if (!this.ticketCode) {
-    this.ticketCode = `REF-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  }
-});
 
 // Enhanced Indexes for the  Scanner
 ticketSchema.index({ event: 1, checkInCode: 1 });

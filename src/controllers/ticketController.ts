@@ -3,7 +3,7 @@ import httpStatus from "http-status";
 import { Ticket } from "../models/Ticket.js";
 import AppError from "../utils/AppError.js";
 import * as ticketService from "./services/ticketService.js";
-import { Order } from "../models/Order.js";
+
 import {
   SyncTicketsParams,
   SyncTicketsQuery,
@@ -30,7 +30,6 @@ export const initializeBooking = async (
       discountCode,
     } = req.body;
     const userId = (req.user as any)?.id?.toString() || null;
-    console.log("RESOLVED ACCOUNT ID:", userId);
 
     const result = await ticketService.processBooking(
       userId,
@@ -99,7 +98,7 @@ export const getTicketDetails = async (
     const ticket = await ticketService.getTicketById(id as string);
 
     if (!ticket) {
-      return next(new AppError("Ticket not found", httpStatus.NOT_FOUND));
+      return next(new AppError(httpStatus.NOT_FOUND, "Ticket not found"));
     }
 
     // SECURITY: Ensure the person asking is the owner or Kivo staff
@@ -110,8 +109,8 @@ export const getTicketDetails = async (
     if (ticket.owner?.toString() !== userId && !isStaff) {
       return next(
         new AppError(
-          "You do not have permission to view this ticket",
           httpStatus.FORBIDDEN,
+          "You do not have permission to view this ticket",
         ),
       );
     }
@@ -200,7 +199,7 @@ export const refundTicket = async (
     // Authorization check: Only organizers or admins should refund
     const userRole = (req.user as any)?.role;
     if (!["admin", "organizer"].includes(userRole)) {
-      throw new AppError("Unauthorized to issue refunds", httpStatus.FORBIDDEN);
+      throw new AppError(httpStatus.FORBIDDEN, "Unauthorized to issue refunds");
     }
 
     const result = await ticketService.processTicketRefund(

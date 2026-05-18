@@ -1,7 +1,7 @@
 import mongoose, { ClientSession } from "mongoose";
 import httpStatus from "http-status";
 import { nanoid } from "nanoid";
-
+import crypto from "node:crypto";
 import { Order } from "../../models/Order.js";
 import { ORDER_STATUS, TICKET_STATUS } from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
@@ -88,6 +88,10 @@ const createTicketsForOrder = async (
   const ticketsToCreate = [];
 
   for (let i = 0; i < order.quantity; i++) {
+    const checkInCode = `KIVO-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+    const ticketCode = `REF-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+    const firstName = buyerDetails?.firstName || order?.buyerEmail?.split("@")[0] || "Guest";
+const lastName = buyerDetails?.lastName || "Attendee";
     ticketsToCreate.push({
       event: order.event,
       owner: order.user,
@@ -95,15 +99,19 @@ const createTicketsForOrder = async (
       tierName: order.tierName,
       pricePaid: order.totalAmount / order.quantity,
       buyerInfo: {
-        firstName: buyerDetails.firstName,
-        lastName: buyerDetails.lastName,
+        firstName,
+        lastName,
         email: order.buyerEmail,
       },
+      ticketCode,
+      checkInCode,
       status: TICKET_STATUS.valid || "valid",
     });
   }
 
-  const tickets = await Ticket.insertMany(ticketsToCreate, { session });
+  const tickets = await Ticket.insertMany(ticketsToCreate, {
+    session,
+  });
   const eventData = await Event.findById(order.event).session(session);
 
   return {
@@ -584,7 +592,7 @@ export const releaseExpiredInventory = async () => {
       );
 
       // 3. Mark the order as CANCELLED or EXPIRED so it's not processed again
-      order.status = "expired"; // Add this to your ORDER_STATUS constants
+      order.status = ORDER_STATUS.EXPIRED; 
       await order.save({ session });
 
       logger.info(
@@ -610,9 +618,9 @@ export const processTicketRefund = async (ticketCode: string) => {
     const ticket = await Ticket.findOne({ ticketCode })
       .populate("order")
       .session(session);
-    if (!ticket) throw new AppError("Ticket not found", httpStatus.NOT_FOUND);
+    if (!ticket) throw new AppError(httpStatus.NOT_FOUND,"Ticket not found", );
     if (ticket.status === "refunded")
-      throw new AppError("Already refunded", httpStatus.BAD_REQUEST);
+      throw new AppError(httpStatus.BAD_REQUEST,"Already refunded", );
 
     const order = ticket.order as any;
 
