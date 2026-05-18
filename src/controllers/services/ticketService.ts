@@ -90,8 +90,9 @@ const createTicketsForOrder = async (
   for (let i = 0; i < order.quantity; i++) {
     const checkInCode = `KIVO-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
     const ticketCode = `REF-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-    const firstName = buyerDetails?.firstName || order?.buyerEmail?.split("@")[0] || "Guest";
-const lastName = buyerDetails?.lastName || "Attendee";
+    const firstName =
+      buyerDetails?.firstName || order?.buyerEmail?.split("@")[0] || "Guest";
+    const lastName = buyerDetails?.lastName || "Attendee";
     ticketsToCreate.push({
       event: order.event,
       owner: order.user,
@@ -211,7 +212,11 @@ export const processBooking = async (
       await session.commitTransaction();
 
       kivoEvents.emit("order.fulfilled", { order, tickets, eventImage });
-      return { isFree: true, reference: order.paymentReference };
+      return {
+        isFree: true,
+        reference: order.paymentReference,
+        checkInCode: tickets[0]?.checkInCode || "",
+      };
     }
 
     // Paid Flow
@@ -592,7 +597,7 @@ export const releaseExpiredInventory = async () => {
       );
 
       // 3. Mark the order as CANCELLED or EXPIRED so it's not processed again
-      order.status = ORDER_STATUS.EXPIRED; 
+      order.status = ORDER_STATUS.EXPIRED;
       await order.save({ session });
 
       logger.info(
@@ -618,9 +623,9 @@ export const processTicketRefund = async (ticketCode: string) => {
     const ticket = await Ticket.findOne({ ticketCode })
       .populate("order")
       .session(session);
-    if (!ticket) throw new AppError(httpStatus.NOT_FOUND,"Ticket not found", );
+    if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
     if (ticket.status === "refunded")
-      throw new AppError(httpStatus.BAD_REQUEST,"Already refunded", );
+      throw new AppError(httpStatus.BAD_REQUEST, "Already refunded");
 
     const order = ticket.order as any;
 
