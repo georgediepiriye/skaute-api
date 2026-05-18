@@ -26,23 +26,12 @@ export const createEvent = async (
 
     let imageUrl = "https://picsum.photos/seed/skaute/1200/800";
 
-    // 2. Handle Image Upload to Cloudinary
+    // 2. Handle Image Upload to Cloudinary via Unsigned Upload
     if (req.file) {
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            folder: "skaute_events",
-            // Keep the transformation settings
-            eager: [
-              {
-                width: 1200,
-                crop: "limit",
-                quality: "auto",
-                fetch_format: "auto",
-              },
-            ],
-            // FIXED: Removed eager_async completely.
-            // This stops the SDK from injecting "eager_async=0" into the production signature string.
+            upload_preset: "skaute_events",
           },
           (error, result) => {
             if (error) return reject(error);
@@ -52,8 +41,7 @@ export const createEvent = async (
         stream.end(req.file!.buffer);
       });
 
-      // Extract the eager transformed secure URL
-      imageUrl = (uploadResult as any).eager[0].secure_url;
+      imageUrl = (uploadResult as any).secure_url;
     }
 
     // 3. Prepare the final data object
