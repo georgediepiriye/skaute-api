@@ -24,22 +24,26 @@ export const createEvent = async (
         ? JSON.parse(req.body.eventData)
         : { ...req.body };
 
-    let imageUrl = "https://picsum.photos/seed/kivo/1200/800";
+    // Updated placeholder seed to reflect your Skaute brand
+    let imageUrl = "https://picsum.photos/seed/skaute/1200/800";
 
     // 2. Handle Image Upload to Cloudinary
     if (req.file) {
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            folder: "kivo_events",
-            // FIXED: Flattened the transformation array into a single object mapping.
-            // This ensures Cloudinary signs a flat string parameter, avoiding signature mismatches.
-            transformation: {
-              width: 1200,
-              crop: "limit",
-              quality: "auto",
-              fetch_format: "auto",
-            },
+            // Updated asset folder for clean brand grouping
+            folder: "skaute_events",
+            // Using eager transformations to avoid SDK parameter signing mismatches
+            eager: [
+              {
+                width: 1200,
+                crop: "limit",
+                quality: "auto",
+                fetch_format: "auto",
+              },
+            ],
+            eager_async: false, // Ensures the transformed URL is generated instantly
           },
           (error, result) => {
             if (error) return reject(error);
@@ -49,7 +53,8 @@ export const createEvent = async (
         stream.end(req.file!.buffer);
       });
 
-      imageUrl = (uploadResult as any).secure_url;
+      // Extract the eager transformed secure URL instead of the raw original asset URL
+      imageUrl = (uploadResult as any).eager[0].secure_url;
     }
 
     // 3. Prepare the final data object
