@@ -32,11 +32,14 @@ export const createEvent = async (
         const stream = cloudinary.uploader.upload_stream(
           {
             folder: "kivo_events",
-            // Optimized for lower-bandwidth connections in PH
-            transformation: [
-              { width: 1200, crop: "limit" },
-              { quality: "auto", fetch_format: "auto" },
-            ],
+            // FIXED: Flattened the transformation array into a single object mapping.
+            // This ensures Cloudinary signs a flat string parameter, avoiding signature mismatches.
+            transformation: {
+              width: 1200,
+              crop: "limit",
+              quality: "auto",
+              fetch_format: "auto",
+            },
           },
           (error, result) => {
             if (error) return reject(error);
