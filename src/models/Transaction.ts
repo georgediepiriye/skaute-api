@@ -4,7 +4,7 @@ export interface ITransaction extends Document {
   wallet: mongoose.Types.ObjectId;
   type: "ticket_sale" | "withdrawal" | "refund" | "payout";
   amount: number;
-  fee: number; // Kivo's service fee
+  fee: number; // scaute's service fee
   status: "pending" | "success" | "failed";
   reference: string; // Paystack reference or internal ID
   metadata?: any;

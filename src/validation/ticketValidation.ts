@@ -9,6 +9,7 @@ export const bookTicketSchema = z.object({
     tierName: z.string().min(1, "Please select a ticket tier"),
     quantity: z.number().int().positive().default(1),
     discountCode: z.string().optional(),
+    eventTitle: z.string().optional(),
   }),
 });
 

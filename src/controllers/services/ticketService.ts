@@ -10,7 +10,7 @@ import { PaystackService } from "../../utils/paystackServices.js";
 import config from "../../config/config.js";
 import { Ticket } from "../../models/Ticket.js";
 import logger from "../../utils/logger.js";
-import kivoEvents from "../../utils/eventsEmitter.js";
+import scauteEvents from "../../utils/eventsEmitter.js";
 import { User } from "../../models/User.js";
 import { Discount } from "../../models/Discount.js";
 
@@ -88,7 +88,7 @@ const createTicketsForOrder = async (
   const ticketsToCreate = [];
 
   for (let i = 0; i < order.quantity; i++) {
-    const checkInCode = `KIVO-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+    const checkInCode = `SKT-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
     const ticketCode = `REF-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
     const firstName =
       buyerDetails?.firstName || order?.buyerEmail?.split("@")[0] || "Guest";
@@ -129,6 +129,7 @@ export const processBooking = async (
   quantity: number = 1,
   buyerDetails: { firstName: string; lastName: string },
   discountCode?: string,
+  eventTitle?: string,
 ) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -197,7 +198,7 @@ export const processBooking = async (
         [
           {
             ...orderData,
-            paymentReference: `KIVO-${nanoid(10).toUpperCase()}`,
+            paymentReference: `SKT-${nanoid(10).toUpperCase()}`,
             status: ORDER_STATUS.COMPLETED,
           },
         ],
@@ -211,7 +212,7 @@ export const processBooking = async (
       );
       await session.commitTransaction();
 
-      kivoEvents.emit("order.fulfilled", { order, tickets, eventImage });
+      scauteEvents.emit("order.fulfilled", { order, tickets, eventImage });
       return {
         isFree: true,
         reference: order.paymentReference,
@@ -230,6 +231,7 @@ export const processBooking = async (
         tierName,
         quantity,
         discountCode,
+        eventTitle,
         ...buyerDetails,
       },
     });
@@ -312,7 +314,7 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
 
     await session.commitTransaction();
 
-    kivoEvents.emit("order.fulfilled", {
+    scauteEvents.emit("order.fulfilled", {
       order,
       tickets,
       eventImage,
@@ -656,7 +658,7 @@ export const processTicketRefund = async (ticketCode: string) => {
     await session.commitTransaction();
 
     // 5. Async Notification
-    kivoEvents.emit("ticket.refunded", { ticket, order });
+    scauteEvents.emit("ticket.refunded", { ticket, order });
 
     return ticket;
   } catch (error) {

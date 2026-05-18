@@ -19,7 +19,7 @@ describe("Event Routes", () => {
     // Create a mock organizer to get a token
     const organizer = await User.create({
       name: "PH Organizer",
-      email: "organizer@kivo.app",
+      email: "organizer@scaute.app",
       password: "password123",
       role: "organizer",
     });
@@ -27,7 +27,7 @@ describe("Event Routes", () => {
 
     // Login to get the token
     const loginRes = await request(app).post("/v1/auth/login").send({
-      email: "organizer@kivo.app",
+      email: "organizer@scaute.app",
       password: "password123",
     });
     organizerToken = loginRes.body.token;
@@ -38,8 +38,8 @@ describe("Event Routes", () => {
       await Event.deleteMany({});
     });
     const validEvent = {
-      title: "Kivo Rooftop Vibe",
-      slug: "kivo-rooftop-vibe",
+      title: "scaute Rooftop Vibe",
+      slug: "scaute-rooftop-vibe",
       description:
         "Networking and chilled vibes in the heart of Port Harcourt. Come through!",
       eventFormat: "physical",
@@ -63,7 +63,7 @@ describe("Event Routes", () => {
 
       expect(res.status).toBe(201);
       expect(res.body.status).toBe("success");
-      expect(res.body.data.event.title).toBe("Kivo Rooftop Vibe");
+      expect(res.body.data.event.title).toBe("scaute Rooftop Vibe");
       expect(res.body.data.event.organizer).toBe(userId);
     });
 
@@ -83,13 +83,13 @@ describe("Event Routes", () => {
     //   // Create a standard user
     //   await User.create({
     //     name: "Regular Joe",
-    //     email: "joe@kivo.app",
+    //     email: "joe@scaute.app",
     //     password: "password123",
     //     role: "user",
     //   });
 
     //   const loginRes = await request(app).post("/v1/auth/login").send({
-    //     email: "joe@kivo.app",
+    //     email: "joe@scaute.app",
     //     password: "password123",
     //   });
 
@@ -137,7 +137,7 @@ describe("Event Routes", () => {
         totalCapacity: 500,
         ticketsSold: 0,
 
-        communityLink: "https://chat.whatsapp.com/KivoTest",
+        communityLink: "https://chat.whatsapp.com/scauteTest",
         meetingLink: "https://zoom.us/j/123",
       });
 

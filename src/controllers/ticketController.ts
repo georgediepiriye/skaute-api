@@ -28,6 +28,7 @@ export const initializeBooking = async (
       firstName,
       lastName,
       discountCode,
+      eventTitle,
     } = req.body;
     const userId = (req.user as any)?.id?.toString() || null;
 
@@ -39,6 +40,7 @@ export const initializeBooking = async (
       quantity,
       { firstName, lastName },
       discountCode,
+      eventTitle,
     );
 
     res.status(httpStatus.OK).json({
@@ -101,7 +103,7 @@ export const getTicketDetails = async (
       return next(new AppError(httpStatus.NOT_FOUND, "Ticket not found"));
     }
 
-    // SECURITY: Ensure the person asking is the owner or Kivo staff
+    // SECURITY: Ensure the person asking is the owner or scaute staff
     const userId = (req.user as any)?.id?.toString();
     const userRole = (req.user as any)?.role;
     const isStaff = ["admin", "staff", "organizer"].includes(userRole);

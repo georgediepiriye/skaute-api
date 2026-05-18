@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 import {
   EventCategory,
-  KivoType,
+  scauteType,
   EVENT_TYPES,
   EVENT_CATEGORIES,
 } from "../lib/constants.js";
@@ -36,7 +36,7 @@ export interface IEvent extends Document {
   category: EventCategory;
   startDate: Date;
   endDate: Date;
-  type: KivoType;
+  type: scauteType;
   status: ("casual" | "verified" | "featured")[];
   approvalStatus: "pending" | "approved" | "rejected";
 
@@ -113,7 +113,12 @@ const coOrganizerSchema = new Schema<ICoOrganizer>(
     },
     permissions: {
       type: [String],
-      enum: ["view_revenue", "issue_refunds", "send_broadcasts", "scan_tickets"],
+      enum: [
+        "view_revenue",
+        "issue_refunds",
+        "send_broadcasts",
+        "scan_tickets",
+      ],
       default: ["scan_tickets"],
     },
     assignedAt: {
@@ -121,7 +126,7 @@ const coOrganizerSchema = new Schema<ICoOrganizer>(
       default: Date.now,
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const eventSchema = new Schema<IEvent>(
@@ -196,7 +201,7 @@ const eventSchema = new Schema<IEvent>(
 
     image: {
       type: String,
-      default: "https://picsum.photos/seed/kivo/1200/800",
+      default: "https://picsum.photos/seed/scaute/1200/800",
     },
 
     isFree: { type: Boolean, default: true },

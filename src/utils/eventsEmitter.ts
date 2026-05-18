@@ -3,7 +3,7 @@ import logger from "./logger.js";
 import { sendTicketEmail, sendRefundEmail } from "./emailService.js"; // Assume sendRefundEmail exists
 
 // Initialize the EventEmitter
-const kivoEvents = new EventEmitter();
+const scauteEvents = new EventEmitter();
 
 /**
  * Handle Order Fulfillment (Success)
@@ -57,13 +57,13 @@ const handleTicketRefunded = async ({
  * PREVENT MEMORY LEAKS
  * removeAllListeners ensures we don't duplicate listeners during hot-reloads
  */
-kivoEvents.removeAllListeners("order.fulfilled");
-kivoEvents.removeAllListeners("ticket.refunded");
+scauteEvents.removeAllListeners("order.fulfilled");
+scauteEvents.removeAllListeners("ticket.refunded");
 
 // Register the listeners
-kivoEvents.on("order.fulfilled", handleOrderFulfilled);
-kivoEvents.on("ticket.refunded", handleTicketRefunded);
+scauteEvents.on("order.fulfilled", handleOrderFulfilled);
+scauteEvents.on("ticket.refunded", handleTicketRefunded);
 
-kivoEvents.setMaxListeners(20);
+scauteEvents.setMaxListeners(20);
 
-export default kivoEvents;
+export default scauteEvents;

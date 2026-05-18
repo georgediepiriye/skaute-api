@@ -33,7 +33,7 @@ const envVarsSchema = z
     DEV_DATABASE_URL: z.string().optional().describe("Development DB URL"),
     STAGING_DATABASE_URL: z.string().optional().describe("Staging DB URL"),
 
-    // Payments & Services (Kivo Core)
+    // Payments & Services (scaute Core)
     PAYSTACK_SECRET_KEY: z.string().describe("Paystack secret KEY"),
     PAYSTACK_BASE_API: z.string().url().describe("Paystack base API URL"),
 
@@ -55,7 +55,7 @@ const envVarsSchema = z
     CLOUDINARY_API_SECRET: z.string().describe("Cloudinary API secret"),
 
     // Logic/Taxation
-    KIVO_TAX_PERCENTAGE: z
+    scaute_TAX_PERCENTAGE: z
       .string()
       .default("0.05")
       .transform((num) => Number(num))
@@ -128,7 +128,7 @@ const config = {
   clientUrl: envVars.CLIENT_ORIGIN,
   apiUrl: envVars.API_URL,
   sendGridApiKey: envVars.SENDGRID_API_KEY,
-  tax: envVars.KIVO_TAX_PERCENTAGE,
+  tax: envVars.scaute_TAX_PERCENTAGE,
   sentryDsn: envVars.SENTRY_DSN,
   resendApiKey: envVars.RESEND_API_KEY,
   googleOAuth: {

@@ -11,7 +11,7 @@ let server: Server;
  */
 const bootstrap = async () => {
   try {
-    console.log("⏳ Initializing Kivo API startup...");
+    console.log("⏳ Initializing Scaute API startup...");
 
     // 1. Wait for Database
     await connectDB();
@@ -21,7 +21,7 @@ const bootstrap = async () => {
     // 2. Start Server only if DB is successful
     server = app.listen(config.port, () => {
       console.log(
-        `🚀 Kivo API running on port ${config.port} in ${config.env} mode`,
+        `🚀 scaute API running on port ${config.port} in ${config.env} mode`,
       );
     });
   } catch (err) {

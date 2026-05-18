@@ -85,7 +85,7 @@ app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.get("/health", (req: Request, res: Response) => {
   res.status(200).json({
     status: "success",
-    message: "Kivo API is up and running",
+    message: "Scaute API is up and running",
     timestamp: new Date().toISOString(),
   });
 });

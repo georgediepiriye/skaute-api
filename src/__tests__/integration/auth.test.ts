@@ -15,8 +15,8 @@ describe("Auth Routes", () => {
   describe("POST /v1/auth/signup", () => {
     it("should successfully register a new user and return a token", async () => {
       const newUser = createFakeUserForSignup("user", {
-        name: "George Kivo",
-        email: "george@kivo.app",
+        name: "George Diepiriye",
+        email: "george@scaute.app",
       });
 
       const res = await request(app).post("/v1/auth/signup").send(newUser);
@@ -25,20 +25,20 @@ describe("Auth Routes", () => {
       expect(res.status).toBe(201);
       expect(res.body.status).toBe("success");
       expect(res.body).toHaveProperty("token");
-      expect(res.body.data.user.email).toBe("george@kivo.app");
+      expect(res.body.data.user.email).toBe("george@scaute.app");
 
       // Verify the password is NOT returned in the response
       expect(res.body.data.user.password).toBeUndefined();
 
       // Verify the user actually exists in the database
-      const userInDb = await User.findOne({ email: "george@kivo.app" });
+      const userInDb = await User.findOne({ email: "george@scaute.app" });
       expect(userInDb).toBeTruthy();
-      expect(userInDb?.name).toBe("George Kivo");
+      expect(userInDb?.name).toBe("George Diepiriye");
     });
 
     it("should fail if the email is already registered", async () => {
       const existingUser = createFakeUserForSignup("user", {
-        email: "duplicate@kivo.app",
+        email: "duplicate@scaute.app",
       });
 
       // Manually create the first user in the DB
@@ -54,7 +54,7 @@ describe("Auth Routes", () => {
     it("should default to Port Harcourt coordinates if none are provided", async () => {
       const userWithoutLocation = {
         name: "PH Boy",
-        email: "ph@kivo.app",
+        email: "ph@scaute.app",
         password: "password123",
         passwordConfirm: "password123",
       };
@@ -75,14 +75,14 @@ describe("Auth Routes", () => {
       const password = "password123";
       await User.create({
         name: "Login Tester",
-        email: "test@kivo.app",
+        email: "test@scaute.app",
         password,
         role: "organizer",
       });
 
       // 2. Attempt login
       const res = await request(app).post("/v1/auth/login").send({
-        email: "test@kivo.app",
+        email: "test@scaute.app",
         password: password,
       });
 
@@ -95,12 +95,12 @@ describe("Auth Routes", () => {
     it("should reject incorrect passwords", async () => {
       await User.create({
         name: "Security Test",
-        email: "secure@kivo.app",
+        email: "secure@scaute.app",
         password: "realpassword",
       });
 
       const res = await request(app).post("/v1/auth/login").send({
-        email: "secure@kivo.app",
+        email: "secure@scaute.app",
         password: "wrongpassword",
       });
 

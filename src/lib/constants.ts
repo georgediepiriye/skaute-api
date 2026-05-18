@@ -189,7 +189,7 @@ export const TICKET_STATUS = {
   transferred: "transferred", //  Ticket forwarded to another user
 } as const;
 
-export type KivoType = keyof typeof EVENT_TYPES;
+export type scauteType = keyof typeof EVENT_TYPES;
 export type EventCategory = keyof typeof EVENT_CATEGORIES;
 export type HotspotCategory = keyof typeof HOTSPOT_CATEGORIES;
 export type HotspotStatus = keyof typeof HOTSPOT_STATUS;

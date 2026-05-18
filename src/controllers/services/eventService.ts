@@ -224,7 +224,7 @@ export const generateEventInstances = async (parentEvent: IEvent) => {
 };
 
 /**
- * Kivo Discovery Engine: getAllEvents
+ * scaute Discovery Engine: getAllEvents
  * Handles additive priority sorting, location-based discovery in Port Harcourt,
  * and precise date/time filtering for live and upcoming events.
  */
@@ -527,7 +527,7 @@ export const addPartnerToEvent = async (
   if (!userToAdd) {
     throw new AppError(
       httpStatus.NOT_FOUND,
-      "User not found. They must sign up on Kivo first.",
+      "User not found. They must sign up on scaute first.",
     );
   }
 

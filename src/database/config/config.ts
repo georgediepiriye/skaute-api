@@ -16,7 +16,7 @@ const configEnvs = {
     url: config.db.url as string,
   },
   [ENVS.TEST]: {
-    url: config.db.url?.replace("Kivo", "Kivo-Test") as string,
+    url: config.db.url?.replace("scaute", "scaute-Test") as string,
   },
   [ENVS.STAGE]: {
     url: config.db.url as string,
