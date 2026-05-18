@@ -32,6 +32,7 @@ export const createEvent = async (
         const stream = cloudinary.uploader.upload_stream(
           {
             upload_preset: "skaute_events",
+            unsigned: true,
           },
           (error, result) => {
             if (error) return reject(error);
