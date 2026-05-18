@@ -24,7 +24,6 @@ export const createEvent = async (
         ? JSON.parse(req.body.eventData)
         : { ...req.body };
 
-    // Updated placeholder seed to reflect your Skaute brand
     let imageUrl = "https://picsum.photos/seed/skaute/1200/800";
 
     // 2. Handle Image Upload to Cloudinary
@@ -32,9 +31,8 @@ export const createEvent = async (
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           {
-            // Updated asset folder for clean brand grouping
             folder: "skaute_events",
-            // Using eager transformations to avoid SDK parameter signing mismatches
+            // Keep the transformation settings
             eager: [
               {
                 width: 1200,
@@ -43,7 +41,8 @@ export const createEvent = async (
                 fetch_format: "auto",
               },
             ],
-            eager_async: false, // Ensures the transformed URL is generated instantly
+            // FIXED: Removed eager_async completely.
+            // This stops the SDK from injecting "eager_async=0" into the production signature string.
           },
           (error, result) => {
             if (error) return reject(error);
@@ -53,7 +52,7 @@ export const createEvent = async (
         stream.end(req.file!.buffer);
       });
 
-      // Extract the eager transformed secure URL instead of the raw original asset URL
+      // Extract the eager transformed secure URL
       imageUrl = (uploadResult as any).eager[0].secure_url;
     }
 
