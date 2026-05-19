@@ -11,6 +11,9 @@ router.get("/events", adminController.getModerationQueue);
 router.get("/events/:id", adminController.getEventPreview);
 router.patch("/events/:id/status", adminController.processApproval);
 
+//Dedicated promotional & curation control endpoint
+router.patch("/events/:id/promotion", adminController.updateEventPromotion);
+
 // --- USER MANAGEMENT ENDPOINTS ---
 router.get("/users", adminController.getAllUsers);
 router.patch("/users/:id/status", adminController.toggleUserStatus);

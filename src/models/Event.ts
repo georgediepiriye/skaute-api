@@ -37,7 +37,7 @@ export interface IEvent extends Document {
   startDate: Date;
   endDate: Date;
   type: skauteType;
-  status: ("casual" | "verified" | "featured")[];
+  status: ("verified" | "featured")[];
   approvalStatus: "pending" | "approved" | "rejected";
 
   eventFormat: "physical" | "online" | "hybrid";
@@ -63,9 +63,16 @@ export interface IEvent extends Document {
   ticketTiers: ITicketTier[];
   discounts: IDiscount[];
   totalCapacity?: number;
+
+  // Boosting & Discovery Metrics
+  isSkauteHosted: boolean; // 💡 Ultimate priority placement flag
   isBoosted: boolean;
   boostExpiry?: Date;
+  boostTier: "none" | "standard" | "premium";
+  boostedBy?: mongoose.Types.ObjectId;
   priorityLevel: number;
+  verifiedAt?: Date;
+  featuredAt?: Date;
 
   isRecurring: boolean;
   recurrence?: {
@@ -93,6 +100,40 @@ export interface IEvent extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * REUSABLE DISCOVERY PRIORITIZATION UTILITY
+ * Decoupled calculation logic to prevent desynchronization between save loops and API updates
+ */
+export const calculatePriorityScore = (event: {
+  status: ("verified" | "featured")[];
+  isBoosted: boolean;
+  boostExpiry?: Date;
+  isSkauteHosted?: boolean; // 💡 Embedded into calculation layer
+}): number => {
+  let score = 0;
+
+  // 1. Structural validation tiers
+  if (event.status?.includes("verified")) score += 1;
+  if (event.status?.includes("featured")) score += 2;
+
+  // 2. Commercial organic promotion tier
+  const now = new Date();
+  if (
+    event.isBoosted &&
+    event.boostExpiry &&
+    new Date(event.boostExpiry) > now
+  ) {
+    score += 4;
+  }
+
+  // 3. Absolute ecosystem dominance layer (Skaute original/hosted items)
+  if (event.isSkauteHosted) {
+    score += 8;
+  }
+
+  return score;
+};
 
 const ticketTierSchema = new Schema<ITicketTier>({
   name: { type: String, required: true },
@@ -162,8 +203,8 @@ const eventSchema = new Schema<IEvent>(
     },
     status: {
       type: [String],
-      enum: ["casual", "verified", "featured"],
-      default: ["casual"],
+      enum: ["verified", "featured"],
+      default: [],
     },
     approvalStatus: {
       type: String,
@@ -213,9 +254,20 @@ const eventSchema = new Schema<IEvent>(
     ticketTiers: [ticketTierSchema],
     discounts: [discountSchema],
     totalCapacity: { type: Number, default: null },
+
+    // Boosting Infrastructure fields
+    isSkauteHosted: { type: Boolean, default: false, index: true }, // 💡 Added database index targeting platform listings
     isBoosted: { type: Boolean, default: false, index: true },
     boostExpiry: { type: Date },
+    boostTier: {
+      type: String,
+      enum: ["none", "standard", "premium"],
+      default: "none",
+    },
+    boostedBy: { type: Schema.Types.ObjectId, ref: "User" },
     priorityLevel: { type: Number, default: 0, index: true },
+    verifiedAt: { type: Date },
+    featuredAt: { type: Date },
 
     isRecurring: { type: Boolean, default: false },
     recurrence: {
@@ -303,23 +355,19 @@ eventSchema.pre<IEvent>("save", async function (this: IEvent) {
     this.attendees = 0;
   }
 
-  // 4. Update Priority Level using additive logic
+  // 4. Update Priority Level using global decoupled scoring logic
   if (
     this.isModified("status") ||
     this.isModified("isBoosted") ||
-    this.isModified("boostExpiry")
+    this.isModified("boostExpiry") ||
+    this.isModified("isSkauteHosted") // 💡 Sync priority level if platform status shifts
   ) {
-    let score = 0;
-
-    if (this.status.includes("verified")) score += 1;
-    if (this.status.includes("featured")) score += 2;
-
-    const now = new Date();
-    if (this.isBoosted && this.boostExpiry && this.boostExpiry > now) {
-      score += 4;
-    }
-
-    this.priorityLevel = score;
+    this.priorityLevel = calculatePriorityScore({
+      status: this.status,
+      isBoosted: this.isBoosted,
+      boostExpiry: this.boostExpiry,
+      isSkauteHosted: this.isSkauteHosted,
+    });
   }
 });
 
@@ -354,13 +402,22 @@ eventSchema.virtual("startingPrice").get(function (this: IEvent) {
 });
 
 /**
- * INDEXES
+ * DATA INDEXES
  */
 eventSchema.index({ location: "2dsphere" }, { sparse: true });
 eventSchema.index({ "location.neighborhood": 1 }, { sparse: true });
 eventSchema.index({ "recurrence.parentId": 1 });
 eventSchema.index({ startDate: 1 });
-eventSchema.index({ priorityLevel: -1 });
+
+// High-performance compound lookup index designed for lightning-fast localized discovery listings
+eventSchema.index({
+  approvalStatus: 1,
+  isCancelled: 1,
+  isSoldOut: 1,
+  "location.neighborhood": 1,
+  priorityLevel: -1,
+  startDate: 1,
+});
 
 export const Event =
   mongoose.models.Event || mongoose.model<IEvent>("Event", eventSchema);

@@ -4,7 +4,7 @@ import { faker } from "@faker-js/faker";
 import * as dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import { User } from "../models/User.js";
-import { Event } from "../models/Event.js";
+import { Event, calculatePriorityScore } from "../models/Event.js";
 import { EVENT_CATEGORIES, EVENT_TYPES } from "../lib/constants.js";
 
 dotenv.config();
@@ -78,7 +78,7 @@ async function seedDatabase() {
     const typeKeys = Object.keys(EVENT_TYPES);
 
     console.log(
-      "🎲 Generating 100 high-quality events with Sold Out variations...",
+      "🎲 Generating 100 high-quality events with Platform Overrides...",
     );
 
     const eventBatch = Array.from({ length: 100 }).map((_, i) => {
@@ -87,18 +87,24 @@ async function seedDatabase() {
       const isVerified = Math.random() > 0.7;
       const isFeatured = Math.random() > 0.85;
       const isBoosted = Math.random() > 0.9;
-
-      // NEW: Manual Sold Out Toggle logic (15% chance)
       const isSoldOut = Math.random() > 0.85;
 
-      const status = ["casual"];
+      // 💡 NEW: ~7% chance this event is a platform owned/managed master move
+      const isSkauteHosted = Math.random() > 0.93;
+
+      const status: ("verified" | "featured")[] = [];
       if (isVerified) status.push("verified");
       if (isFeatured) status.push("featured");
 
-      let priorityLevel = 0;
-      if (isVerified) priorityLevel += 1;
-      if (isFeatured) priorityLevel += 2;
-      if (isBoosted) priorityLevel += 4;
+      const boostExpiry = isBoosted ? faker.date.soon({ days: 7 }) : undefined;
+
+      // 💡 Updated calculation engine execution to natively account for platform-hosted weight
+      const priorityLevel = calculatePriorityScore({
+        status,
+        isBoosted,
+        boostExpiry,
+        isSkauteHosted,
+      });
 
       const formatRoll = Math.random();
       let eventFormat: "physical" | "hybrid" | "online" =
@@ -130,12 +136,14 @@ async function seedDatabase() {
       }
 
       const attendees = faker.number.int({
-        min: isFeatured ? 50 : 5,
-        max: isFeatured ? 500 : 150,
+        min: isFeatured || isSkauteHosted ? 50 : 5,
+        max: isFeatured || isSkauteHosted ? 500 : 150,
       });
 
       const eventData: any = {
-        title: `${faker.commerce.productAdjective()} ${faker.helpers.arrayElement(["Summit", "Party", "Festival", "Workshop", "Hangout"])}`,
+        title: isSkauteHosted
+          ? `Skaute Official: ${faker.commerce.productAdjective()} Hangout`
+          : `${faker.commerce.productAdjective()} ${faker.helpers.arrayElement(["Summit", "Party", "Festival", "Workshop", "Hangout"])}`,
         slug: faker.helpers.slugify(
           `${faker.commerce.productAdjective()}-${i}-${Date.now()}`,
         ),
@@ -146,7 +154,21 @@ async function seedDatabase() {
         priorityLevel,
         isBoosted,
         isSoldOut,
-        boostExpiry: isBoosted ? faker.date.soon({ days: 7 }) : undefined,
+        boostExpiry,
+
+        // 💡 Platform metadata anchors
+        isSkauteHosted,
+        boostTier: isBoosted
+          ? faker.helpers.arrayElement(["standard", "premium"])
+          : "none",
+        boostedBy: isBoosted ? host._id : undefined,
+        verifiedAt: isVerified
+          ? faker.date.past({ years: 0.05, refDate: startDate })
+          : undefined,
+        featuredAt: isFeatured
+          ? faker.date.past({ years: 0.05, refDate: startDate })
+          : undefined,
+
         approvalStatus: "approved",
         eventFormat,
         isOnline,
@@ -195,7 +217,6 @@ async function seedDatabase() {
         eventData.ticketTiers = template.map((name, idx) => {
           const capacity = faker.number.int({ min: 50, max: 200 });
 
-          // Logic for "Naturally" sold out tiers (10% chance)
           const isNaturallyFull = Math.random() > 0.9;
           const sold = isNaturallyFull
             ? capacity
@@ -238,9 +259,13 @@ async function seedDatabase() {
 
     await Event.insertMany(eventBatch);
 
-    console.log("🚀 Skaute Database Fully Seeded with Sold Out Moves!");
+    console.log(
+      "🚀 Skaute Database Fully Seeded with Platform-Hosted Priority Engine Keys!",
+    );
     console.log("----------------------------------");
-    console.log(`Port Harcourt Status: 15% Manual Sold Out / 10% Capacity Hit`);
+    console.log(
+      `Port Harcourt Status: ~7% Skaute Hosted Moves Assigned Priority +8`,
+    );
     console.log("----------------------------------");
 
     process.exit(0);

@@ -185,7 +185,6 @@ export const updateUserVerification = async (
   id: string,
   isVerified: boolean,
 ) => {
-  // Directly using findByIdAndUpdate since it doesn't affect lifecycle dependencies
   const user = await User.findByIdAndUpdate(
     id,
     { isVerified },
@@ -378,4 +377,64 @@ export const getEventManagementDetails = async (eventId: string) => {
         : 100,
     },
   };
+};
+
+/**
+ * Mutates discovery engine parameters and forces a recalculation of priority fields
+ */
+export const updateEventPromotionStatus = async (
+  id: string,
+  adminId: string,
+  promotionData: any,
+) => {
+  const event = await Event.findById(id);
+  if (!event) return null;
+
+  // 1. Handle Status Array Updates ("verified", "featured")
+  if (promotionData.statusArray !== undefined) {
+    const oldStatus = [...event.status];
+    event.status = promotionData.statusArray;
+
+    // Track operational timestamps for record-keeping
+    if (
+      promotionData.statusArray.includes("verified") &&
+      !oldStatus.includes("verified")
+    ) {
+      event.verifiedAt = new Date();
+    }
+    if (
+      promotionData.statusArray.includes("featured") &&
+      !oldStatus.includes("featured")
+    ) {
+      event.featuredAt = new Date();
+    }
+  }
+
+  // 2. Handle Skaute Hosted Flag Toggle
+  if (promotionData.isSkauteHosted !== undefined) {
+    event.isSkauteHosted = promotionData.isSkauteHosted;
+  }
+
+  // 3. Handle Commercial Boosting Pipeline
+  if (promotionData.isBoosted !== undefined) {
+    event.isBoosted = promotionData.isBoosted;
+
+    if (promotionData.isBoosted) {
+      event.boostTier = promotionData.boostTier || "standard";
+      event.boostedBy = adminId;
+
+      // Compute future expiration date (defaults to 7 days if not provided)
+      const days = Number(promotionData.boostDays) || 7;
+      event.boostExpiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    } else {
+      // Clear boost metadata if stripped
+      event.boostTier = "none";
+      event.boostExpiry = undefined;
+      event.boostedBy = undefined;
+    }
+  }
+
+  // 4. Critical Step: Save document instance to trigger .pre("save") hook calculation
+  await event.save();
+  return event;
 };

@@ -145,7 +145,7 @@ export const toggleUserVerification = async (
 ) => {
   try {
     const { id } = req.params;
-    const { isVerified } = req.body; // Expects true | false
+    const { isVerified } = req.body;
 
     const updatedUser = await adminService.updateUserVerification(
       id as string,
@@ -215,5 +215,51 @@ export const getEventManagementData = async (
     });
   } catch (error) {
     next(error);
+  }
+};
+
+/**
+ * Updates an event's flags (verified, featured, boosted, skauteHosted)
+ * PATCH /api/admin/events/:id/promotion
+ */
+export const updateEventPromotion = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req.user as any)?.id?.toString();
+
+    const updatedEvent = await adminService.updateEventPromotionStatus(
+      id as string,
+      adminId,
+      req.body,
+    );
+
+    if (!updatedEvent) {
+      return res.status(404).json({
+        success: false,
+        message: "Target event could not be found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Event discoverability settings updated successfully.",
+      data: {
+        id: updatedEvent._id,
+        title: updatedEvent.title,
+        status: updatedEvent.status,
+        isSkauteHosted: updatedEvent.isSkauteHosted,
+        isBoosted: updatedEvent.isBoosted,
+        boostTier: updatedEvent.boostTier,
+        boostExpiry: updatedEvent.boostExpiry,
+        priorityLevel: updatedEvent.priorityLevel,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error updating event promotion:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error updating promotion state.",
+      error: error.message,
+    });
   }
 };

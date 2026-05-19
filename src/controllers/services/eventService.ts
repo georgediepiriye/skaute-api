@@ -223,15 +223,26 @@ export const generateEventInstances = async (parentEvent: IEvent) => {
   }
 };
 
-/**
- * skaute Discovery Engine: getAllEvents
- * Handles additive priority sorting, location-based discovery in Port Harcourt,
- * and precise date/time filtering for live and upcoming events.
- */
-export const getAllEvents = async (query: any) => {
-  const queryObj = { ...query };
+interface EventFilterQuery {
+  title?: string;
+  category?: string;
+  isBoosted?: string;
+  isSkauteHosted?: string;
+  timeStatus?: "live" | "upcoming";
+  "startDate[lte]"?: string;
+  "endDate[gte]"?: string;
+  eventFormat?: "online" | "physical";
+  lat?: string;
+  lng?: string;
+  [key: string]: any;
+}
 
-  // Fields to exclude from direct object matching
+/**
+ * 1. EXTRACT EXTRA QUERY PARAMS
+ * Strips API control parameters to leave clean matching properties
+ */
+const extractBaseQueryObj = (query: EventFilterQuery) => {
+  const queryObj = { ...query };
   const excludedFields = [
     "page",
     "sort",
@@ -243,33 +254,43 @@ export const getAllEvents = async (query: any) => {
     "endDate[gte]",
     "lat",
     "lng",
+    "isSkauteHosted",
   ];
   excludedFields.forEach((el) => delete queryObj[el]);
+  return queryObj;
+};
 
-  // Initial filter with base business rules
-  let filter: any = {
+/**
+ * 2. BUILD MUTATED MONGOOSE FILTER
+ * Handles text matches, geofencing, date timelines, and platform properties
+ */
+const buildEventFilter = (
+  query: EventFilterQuery,
+  now: Date = new Date(),
+): any => {
+  const queryObj = extractBaseQueryObj(query);
+
+  const filter: any = {
     ...queryObj,
     approvalStatus: "approved",
     isCancelled: false,
   };
 
-  // 1. TEXT SEARCH & MULTI-CATEGORY
+  // Text Search & Multi-Category
   if (filter.title) filter.title = { $regex: filter.title, $options: "i" };
   if (queryObj.category?.includes(",")) {
     filter.category = { $in: queryObj.category.split(",") };
   }
 
-  const now = new Date();
-
-  // 2. REFINED BOOSTING & PRIORITY LOGIC
-  // If explicitly searching for boosted, check expiry.
-  // Otherwise, we let the Sort Engine handle the visibility.
+  // Boosting & Platform Rules
   if (query.isBoosted === "true") {
     filter.isBoosted = true;
     filter.boostExpiry = { $gt: now };
   }
+  if (query.isSkauteHosted === "true") filter.isSkauteHosted = true;
+  if (query.isSkauteHosted === "false") filter.isSkauteHosted = false;
 
-  // 3. TIME STATUS LOGIC (Live vs Upcoming)
+  // Time Status Logic (Live vs Upcoming)
   if (query.timeStatus === "live") {
     filter.startDate = { $lte: now };
     filter.endDate = { $gte: now };
@@ -277,32 +298,29 @@ export const getAllEvents = async (query: any) => {
     filter.startDate = { $gt: now };
   }
 
-  // 4. DATE RANGE LOGIC
-  if (query["startDate[lte]"] || query["endDate[gte]"]) {
-    const dateQuery: any = {};
-    if (query["startDate[lte]"])
-      dateQuery.$lte = new Date(query["startDate[lte]"]);
-
-    if (query["endDate[gte]"]) {
-      // Corrected logic: Ensure we don't overwrite filter.startDate if it exists
-      filter.startDate = { ...(filter.startDate || {}), ...dateQuery };
-      filter.endDate = {
-        ...(filter.endDate || {}),
-        $gte: new Date(query["endDate[gte]"]),
-      };
-    }
+  // Explicit Date Range Logic
+  if (query["startDate[lte]"]) {
+    filter.startDate = {
+      ...(filter.startDate || {}),
+      $lte: new Date(query["startDate[lte]"]),
+    };
+  }
+  if (query["endDate[gte]"]) {
+    filter.endDate = {
+      ...(filter.endDate || {}),
+      $gte: new Date(query["endDate[gte]"]),
+    };
   }
 
-  // 5. PHYSICAL VS VIRTUAL LOGIC
+  // Location Format Logic
   if (query.eventFormat) {
-    if (query.eventFormat === "online") {
+    if (query.eventFormat === "online")
       filter.eventFormat = { $in: ["online", "hybrid"] };
-    } else if (query.eventFormat === "physical") {
+    if (query.eventFormat === "physical")
       filter.eventFormat = { $in: ["physical", "hybrid"] };
-    }
   }
 
-  // 6. GEO-SPATIAL LOGIC (Focusing on Port Harcourt radius)
+  // Geospatial Bound Layer (Port Harcourt radius focus)
   if (query.lat && query.lng) {
     filter.location = {
       $geoWithin: {
@@ -314,35 +332,48 @@ export const getAllEvents = async (query: any) => {
     };
   }
 
-  // 7. BUILD QUERY
+  return filter;
+};
+
+/**
+ * 3. EXECUTABLE SORT PIPELINE DEFINITION
+ * Manages Discovery Engine sorting chains smoothly
+ */
+const applyQuerySorting = (dbQuery: any, sortParam?: string) => {
+  if (sortParam) {
+    return dbQuery.sort(sortParam.split(",").join(" "));
+  }
+
+  return dbQuery.sort({
+    priorityLevel: -1, // Dynamic Tier Engine Placement (8 > 4 > 2 > 0)
+    isBoosted: -1, // Active commercial boosts within matching priority tiers
+    startDate: 1, // Happening soonest
+    createdAt: -1, // Newest entries fallback
+  });
+};
+
+/**
+ * MASTER EXPORTED SERVICE FUNCTION
+ */
+export const getAllEvents = async (query: EventFilterQuery) => {
+  const now = new Date();
+  const filter = buildEventFilter(query, now);
+
+  // Initialize and populate base mongoose execution query
   let dbQuery = Event.find(filter).populate({
     path: "organizer",
     select: "name image location role",
   });
 
-  /**
-   * 8. THE DISCOVERY ENGINE (The Fix)
-   * We want Priority 5 to be the absolute master.
-   * Boosted status is the secondary driver.
-   */
-  if (query.sort) {
-    // Allows API consumers to override if they specifically ask for "newest"
-    dbQuery = dbQuery.sort(query.sort.split(",").join(" "));
-  } else {
-    dbQuery = dbQuery.sort({
-      priorityLevel: -1, // 1. Absolute highest rank (5 > 3 > 1)
-      isBoosted: -1, // 2. Paid boosts within those ranks
-      startDate: 1, // 3. Happening soonest
-      createdAt: -1, // 4. Newest entries
-    });
-  }
+  // Apply discovery sorting
+  dbQuery = applyQuerySorting(dbQuery, query.sort);
 
-  // 9. PAGINATION & EXECUTION
+  // Setup Pagination Metrics
   const page = Number(query.page) || 1;
   const limit = Number(query.limit) || 20;
   const skip = (page - 1) * limit;
 
-  // Run total count and data fetch in parallel for performance
+  // Run total counts and document array requests in parallel
   const [events, total] = await Promise.all([
     dbQuery.skip(skip).limit(limit).lean(),
     Event.countDocuments(filter),
