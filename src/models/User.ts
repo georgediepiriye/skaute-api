@@ -2,7 +2,8 @@ import mongoose, { Schema, Document } from "mongoose";
 import bcrypt from "bcryptjs";
 import { USER_ROLES, UserRole } from "../lib/constants.js";
 
-// 1. Updated Interface
+export type UserStatus = "active" | "suspended" | "pending";
+
 export interface IUser extends Document {
   id: string;
   googleId?: string;
@@ -19,6 +20,7 @@ export interface IUser extends Document {
     neighborhood?: string;
     city?: string;
   };
+  status: UserStatus;
   active: boolean;
   correctPassword(
     candidatePassword: string,
@@ -84,6 +86,11 @@ const userSchema = new Schema<IUser>(
       neighborhood: String,
       city: { type: String, default: "Port Harcourt" },
     },
+    status: {
+      type: String,
+      enum: ["active", "suspended", "pending"],
+      default: "active",
+    },
 
     active: {
       type: Boolean,
@@ -108,14 +115,16 @@ userSchema.index({ location: "2dsphere" });
  * PASSWORD HASHING MIDDLEWARE
  */
 userSchema.pre<IUser>("save", async function () {
-  // 1. If password hasn't been changed or doesn't exist, exit the function
-  // In an async function, 'return' is the same as calling 'next()'
   if (!this.isModified("password") || !this.password) {
     return;
   }
-
-  // 2. Hash the password and re-assign it to the document
   this.password = await bcrypt.hash(this.password, 12);
+});
+
+userSchema.pre<IUser>("save", function (next) {
+  if (this.isModified("status")) {
+    this.active = this.status === "active";
+  }
 });
 
 userSchema.methods.correctPassword = async function (

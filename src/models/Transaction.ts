@@ -12,7 +12,6 @@ export interface ITransaction extends Document {
 
 const transactionSchema = new Schema<ITransaction>(
   {
-    wallet: { type: Schema.Types.ObjectId, ref: "Wallet", required: true },
     type: {
       type: String,
       enum: ["ticket_sale", "withdrawal", "refund", "payout"],

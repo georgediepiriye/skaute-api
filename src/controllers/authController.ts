@@ -27,7 +27,6 @@ export const login = catchAsync(
     const user = await authService.verifyUser(email, password);
     const token = signToken(user._id.toString(), user.role);
 
-    // 💡 REMOVED: res.cookie("token", ...) is gone.
     res.status(httpStatus.OK).json({
       status: "success",
       token,

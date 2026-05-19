@@ -31,9 +31,6 @@ const extractToken = (req: Request): string | undefined => {
   return undefined;
 };
 
-/**
- * Strict Protection Middleware - Rejects all unauthorized users
- */
 export const protect = (async (
   req: Request,
   res: Response,
@@ -59,6 +56,17 @@ export const protect = (async (
       return res.status(401).json({
         status: "fail",
         message: "The user belonging to this token no longer exists.",
+      });
+    }
+
+    // 🛑 ACTIVE RUNTIME GUARD: Stop suspended users from hitting your application controllers
+    if (currentUser.status === "suspended") {
+      logger.warn(
+        `Protected access blocked: Suspended user token detected - ${currentUser._id}`,
+      );
+      return res.status(403).json({
+        status: "fail",
+        message: "Your account has been suspended. Access denied.",
       });
     }
 
@@ -92,7 +100,7 @@ export const optionalProtect = (async (
     const decoded = jwt.verify(token, config.jwt.secret) as any;
     const currentUser = await User.findById(decoded.id);
 
-    if (currentUser) {
+    if (currentUser && currentUser.status !== "suspended") {
       (req as any).user = currentUser;
     }
 

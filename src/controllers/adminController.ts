@@ -88,20 +88,83 @@ export const processApproval = async (
   }
 };
 
-// controllers/adminController.js
 export const getAllUsers = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { users, total } = await adminService.getUsersList(req.query);
+    const { users, pagination } = await adminService.getUsersList(req.query);
 
     res.status(httpStatus.OK).json({
       status: "success",
       results: users.length,
-      total,
-      data: users,
+      pagination,
+      data: { users },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const toggleUserStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // Expects "active" | "suspended"
+
+    const updatedUser = await adminService.updateUserStatus(
+      id as string,
+      status,
+    );
+
+    if (!updatedUser) {
+      return res.status(httpStatus.NOT_FOUND).json({
+        status: "error",
+        message: "User account could not be found.",
+      });
+    }
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: `User account has been successfully set to ${status}.`,
+      data: { user: updatedUser },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const toggleUserVerification = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const { isVerified } = req.body; // Expects true | false
+
+    const updatedUser = await adminService.updateUserVerification(
+      id as string,
+      isVerified,
+    );
+
+    if (!updatedUser) {
+      return res.status(httpStatus.NOT_FOUND).json({
+        status: "error",
+        message: "User account could not be found.",
+      });
+    }
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: isVerified
+        ? "User verification approved successfully."
+        : "User verification status revoked.",
+      data: { user: updatedUser },
     });
   } catch (error) {
     next(error);

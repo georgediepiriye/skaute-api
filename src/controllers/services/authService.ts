@@ -36,7 +36,6 @@ export const verifyUser = async (
   const user = await User.findOne({ email }).select("+password +googleId");
 
   if (!user) {
-    // SECURITY LOG: Brute force tracking
     logger.warn(`Login failed: User not found - ${email}`);
     throw new AppError(httpStatus.UNAUTHORIZED, "Incorrect email or password");
   }
@@ -60,7 +59,13 @@ export const verifyUser = async (
     throw new AppError(httpStatus.UNAUTHORIZED, "Incorrect email or password");
   }
 
-  // SUCCESS LOG: Essential for tracking session issues later
+  if (user.status === "suspended") {
+    logger.warn(`Login rejected: Account is suspended - ${user._id}`);
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Your account has been suspended. Please contact customer support.",
+    );
+  }
   logger.info(`User logged in: ${user._id}`);
   return user;
 };
