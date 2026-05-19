@@ -23,14 +23,14 @@ describe("Auth Service Unit Tests", () => {
 
   describe("createUser", () => {
     const mockUserData = {
-      email: "test@scaute.app",
+      email: "test@skaute.app",
       name: "George",
       password: "password123",
     };
 
     it("should throw an error if email is already in use", async () => {
       // Use mockResolvedValue on the spy
-      findOneSpy.mockResolvedValue({ email: "test@scaute.app" } as any);
+      findOneSpy.mockResolvedValue({ email: "test@skaute.app" } as any);
 
       await expect(authService.createUser(mockUserData)).rejects.toThrow(
         new AppError(httpStatus.BAD_REQUEST, "Email already in use"),
@@ -56,7 +56,7 @@ describe("Auth Service Unit Tests", () => {
 
   describe("verifyUser", () => {
     const loginCredentials = {
-      email: "login@scaute.app",
+      email: "login@skaute.app",
       password: "password123",
     };
 
@@ -79,7 +79,7 @@ describe("Auth Service Unit Tests", () => {
 
     it("should throw UNAUTHORIZED if password check fails", async () => {
       const mockUser = {
-        email: "login@scaute.app",
+        email: "login@skaute.app",
         password: "hashed_password",
         correctPassword: (jest.fn() as any).mockResolvedValue(false),
       };
@@ -102,7 +102,7 @@ describe("Auth Service Unit Tests", () => {
     it("should return the user if email and password are correct", async () => {
       const mockUser = {
         _id: "user_id_999",
-        email: "login@scaute.app",
+        email: "login@skaute.app",
         password: "hashed_password",
         correctPassword: (jest.fn() as any).mockResolvedValue(true),
       };

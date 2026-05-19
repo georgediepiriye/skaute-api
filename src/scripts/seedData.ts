@@ -9,7 +9,7 @@ import { EVENT_CATEGORIES, EVENT_TYPES } from "../lib/constants.js";
 
 dotenv.config();
 
-const SCAUTE_EVENT_IMAGES = [
+const SKAUTE_EVENT_IMAGES = [
   "https://res.cloudinary.com/dzhfiblg7/image/upload/v1778009848/kivo_events/bqsjv88hteupsshuufo0.jpg",
   "https://res.cloudinary.com/dzhfiblg7/image/upload/v1778009787/kivo_events/ewwcfo3qgng6jik4oc5a.jpg",
   "https://res.cloudinary.com/dzhfiblg7/image/upload/v1778009554/kivo_events/hbvtzkbh1nqqnmng8urj.jpg",
@@ -58,7 +58,7 @@ async function seedDatabase() {
     const hashedPassword = await bcrypt.hash("password123", 10);
     const userBatch = [
       {
-        name: "scaute Admin",
+        name: "Skaute Admin",
         email: "admin@gmail.com",
         password: hashedPassword,
         role: "admin",
@@ -153,7 +153,7 @@ async function seedDatabase() {
         startDate,
         endDate,
         createdAt,
-        image: faker.helpers.arrayElement(SCAUTE_EVENT_IMAGES),
+        image: faker.helpers.arrayElement(SKAUTE_EVENT_IMAGES),
         organizer: host._id,
         organizerType: host.role === "organizer" ? "business" : "individual",
         isPublic: true,
@@ -238,7 +238,7 @@ async function seedDatabase() {
 
     await Event.insertMany(eventBatch);
 
-    console.log("🚀 Scaute Database Fully Seeded with Sold Out Moves!");
+    console.log("🚀 Skaute Database Fully Seeded with Sold Out Moves!");
     console.log("----------------------------------");
     console.log(`Port Harcourt Status: 15% Manual Sold Out / 10% Capacity Hit`);
     console.log("----------------------------------");

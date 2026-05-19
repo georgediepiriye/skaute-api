@@ -103,7 +103,7 @@ export const getTicketDetails = async (
       return next(new AppError(httpStatus.NOT_FOUND, "Ticket not found"));
     }
 
-    // SECURITY: Ensure the person asking is the owner or scaute staff
+    // SECURITY: Ensure the person asking is the owner or skaute staff
     const userId = (req.user as any)?.id?.toString();
     const userRole = (req.user as any)?.role;
     const isStaff = ["admin", "staff", "organizer"].includes(userRole);

@@ -10,7 +10,7 @@ import { PaystackService } from "../../utils/paystackServices.js";
 import config from "../../config/config.js";
 import { Ticket } from "../../models/Ticket.js";
 import logger from "../../utils/logger.js";
-import scauteEvents from "../../utils/eventsEmitter.js";
+import skauteEvents from "../../utils/eventsEmitter.js";
 import { User } from "../../models/User.js";
 import { Discount } from "../../models/Discount.js";
 
@@ -212,7 +212,7 @@ export const processBooking = async (
       );
       await session.commitTransaction();
 
-      scauteEvents.emit("order.fulfilled", { order, tickets, eventImage });
+      skauteEvents.emit("order.fulfilled", { order, tickets, eventImage });
       return {
         isFree: true,
         reference: order.paymentReference,
@@ -314,7 +314,7 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
 
     await session.commitTransaction();
 
-    scauteEvents.emit("order.fulfilled", {
+    skauteEvents.emit("order.fulfilled", {
       order,
       tickets,
       eventImage,
@@ -658,7 +658,7 @@ export const processTicketRefund = async (ticketCode: string) => {
     await session.commitTransaction();
 
     // 5. Async Notification
-    scauteEvents.emit("ticket.refunded", { ticket, order });
+    skauteEvents.emit("ticket.refunded", { ticket, order });
 
     return ticket;
   } catch (error) {

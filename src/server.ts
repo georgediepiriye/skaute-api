@@ -11,7 +11,7 @@ let server: Server;
  */
 const bootstrap = async () => {
   try {
-    console.log("⏳ Initializing Scaute API startup...");
+    console.log("⏳ Initializing Skaute API startup...");
 
     // 1. Wait for Database
     await connectDB();
@@ -21,7 +21,7 @@ const bootstrap = async () => {
     // 2. Start Server only if DB is successful
     server = app.listen(config.port, () => {
       console.log(
-        `🚀 scaute API running on port ${config.port} in ${config.env} mode`,
+        `🚀 skaute API running on port ${config.port} in ${config.env} mode`,
       );
     });
   } catch (err) {

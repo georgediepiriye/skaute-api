@@ -55,7 +55,7 @@ const hotspots = [
 
   // --- WORKSPACE & ARTS (Productivity & Culture) ---
   {
-    title: "Scaute Hub",
+    title: "Skaute Hub",
     category: HOTSPOT_CATEGORIES.workspace.slug,
     status: "ACTIVE",
     neighborhood: "Trans Amadi",
@@ -92,7 +92,7 @@ const seedDB = async () => {
     if (!uri) throw new Error("MONGO_URI is missing in .env");
 
     await mongoose.connect(uri);
-    console.log("🔌 Connected to scaute DB...");
+    console.log("🔌 Connected to skaute DB...");
 
     await Hotspot.deleteMany({});
     console.log("🗑️ Cleared existing hotspots.");
@@ -101,7 +101,7 @@ const seedDB = async () => {
       title: h.title,
       category: h.category, // Matches your HOTSPOT_CATEGORIES slugs exactly
       status: h.status || "CHILL",
-      description: `Discover the best of Port Harcourt at ${h.title}. A top-rated ${h.category} destination in ${h.neighborhood} curated for the scaute community.`,
+      description: `Discover the best of Port Harcourt at ${h.title}. A top-rated ${h.category} destination in ${h.neighborhood} curated for the skaute community.`,
 
       // Main Cover Image
       image: `https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80`,

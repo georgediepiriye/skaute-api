@@ -3,7 +3,7 @@ import logger from "./logger.js";
 import { sendTicketEmail, sendRefundEmail } from "./emailService.js"; // Assume sendRefundEmail exists
 
 // Initialize the EventEmitter
-const scauteEvents = new EventEmitter();
+const skauteEvents = new EventEmitter();
 
 /**
  * Handle Order Fulfillment (Success)
@@ -57,13 +57,13 @@ const handleTicketRefunded = async ({
  * PREVENT MEMORY LEAKS
  * removeAllListeners ensures we don't duplicate listeners during hot-reloads
  */
-scauteEvents.removeAllListeners("order.fulfilled");
-scauteEvents.removeAllListeners("ticket.refunded");
+skauteEvents.removeAllListeners("order.fulfilled");
+skauteEvents.removeAllListeners("ticket.refunded");
 
 // Register the listeners
-scauteEvents.on("order.fulfilled", handleOrderFulfilled);
-scauteEvents.on("ticket.refunded", handleTicketRefunded);
+skauteEvents.on("order.fulfilled", handleOrderFulfilled);
+skauteEvents.on("ticket.refunded", handleTicketRefunded);
 
-scauteEvents.setMaxListeners(20);
+skauteEvents.setMaxListeners(20);
 
-export default scauteEvents;
+export default skauteEvents;

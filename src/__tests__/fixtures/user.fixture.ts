@@ -1,11 +1,11 @@
 import { faker } from "@faker-js/faker";
 import mongoose from "mongoose";
 
-// The 3 Specific scaute Roles
+// The 3 Specific skaute Roles
 export type UserRole = "user" | "organizer" | "admin";
 
 /**
- * Generates a mock user object based on your scaute Mongoose Schema.
+ * Generates a mock user object based on your skaute Mongoose Schema.
  * Ensures GeoJSON location data is valid for 2dsphere indexing.
  */
 export const createFakeUser = (role: UserRole = "user", overrides?: any) => {

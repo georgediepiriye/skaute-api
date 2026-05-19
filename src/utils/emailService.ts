@@ -35,7 +35,7 @@ export const sendTicketEmail = async (
     const { data, error } = await resend.emails.send({
       from: "onboarding@resend.dev",
       to: "georgediepiriye4u@gmail.com", //change to "to" in production
-      subject: "🎟️ Your Scaute Event Tickets!",
+      subject: "🎟️ Your Skaute Event Tickets!",
       html: `
         <div style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
           <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #ddd;">
@@ -44,12 +44,12 @@ export const sendTicketEmail = async (
             
             <div style="padding: 20px;">
               <h1 style="font-size: 24px; color: #111; margin-top: 0;">Your Adventure Awaits!</h1>
-              <p style="color: #555;">Thanks for booking with scaute. Please have your QR codes ready at the entrance.</p>
+              <p style="color: #555;">Thanks for booking with skaute. Please have your QR codes ready at the entrance.</p>
               
               ${ticketListHtml}
               
               <div style="text-align: center; border-top: 1px solid #eee; margin-top: 20px; padding-top: 20px;">
-                <p style="font-size: 12px; color: #999;">Scaute Platform • Port Harcourt, Rivers State</p>
+                <p style="font-size: 12px; color: #999;">Skaute Platform • Port Harcourt, Rivers State</p>
               </div>
             </div>
           </div>
@@ -74,7 +74,7 @@ export const sendRefundEmail = async (to: string, ticket: any) => {
     const { data, error } = await resend.emails.send({
       from: "onboarding@resend.dev",
       to: "georgediepiriye4u@gmail.com", // Change to "to" in production
-      subject: "💸 Refund Confirmation - Scaute",
+      subject: "💸 Refund Confirmation - Skaute",
       html: `
         <div style="font-family: Arial, sans-serif; background-color: #fdfdfd; padding: 20px;">
           <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #eee; padding: 30px; text-align: center;">
@@ -105,7 +105,7 @@ export const sendRefundEmail = async (to: string, ticket: any) => {
             </p>
 
             <div style="text-align: center; border-top: 1px solid #eee; margin-top: 30px; padding-top: 20px;">
-              <p style="font-size: 10px; color: #ccc; text-transform: uppercase; letter-spacing: 2px;">scaute • Port Harcourt</p>
+              <p style="font-size: 10px; color: #ccc; text-transform: uppercase; letter-spacing: 2px;">skaute • Port Harcourt</p>
             </div>
           </div>
         </div>

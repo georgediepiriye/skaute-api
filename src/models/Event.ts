@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 import {
   EventCategory,
-  scauteType,
+  skauteType,
   EVENT_TYPES,
   EVENT_CATEGORIES,
 } from "../lib/constants.js";
@@ -36,7 +36,7 @@ export interface IEvent extends Document {
   category: EventCategory;
   startDate: Date;
   endDate: Date;
-  type: scauteType;
+  type: skauteType;
   status: ("casual" | "verified" | "featured")[];
   approvalStatus: "pending" | "approved" | "rejected";
 
@@ -201,7 +201,7 @@ const eventSchema = new Schema<IEvent>(
 
     image: {
       type: String,
-      default: "https://picsum.photos/seed/scaute/1200/800",
+      default: "https://picsum.photos/seed/skaute/1200/800",
     },
 
     isFree: { type: Boolean, default: true },
