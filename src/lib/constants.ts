@@ -16,13 +16,11 @@ export const EVENT_TYPES = {
     label: "Activity",
     slug: "activity",
     description: "Community-driven gatherings and social meetups.",
-    defaultStatus: "casual",
   },
   showcase: {
     label: "Showcase",
     slug: "showcase",
     description: "Professional events and curated brand experiences.",
-    defaultStatus: "verified",
   },
 } as const;
 

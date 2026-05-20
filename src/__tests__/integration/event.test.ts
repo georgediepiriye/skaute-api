@@ -44,7 +44,6 @@ describe("Event Routes", () => {
         "Networking and chilled vibes in the heart of Port Harcourt. Come through!",
       eventFormat: "physical",
       type: "activity",
-      status: "casual",
       category: "party",
       startDate: new Date(Date.now() + 86400000).toISOString(), // Tomorrow
       endDate: new Date(Date.now() + 90000000).toISOString(),
@@ -112,7 +111,6 @@ describe("Event Routes", () => {
         description: "Testing the list view of the events route.",
         eventFormat: "physical",
         type: "activity",
-        status: "casual",
         category: "party",
         approvalStatus: "approved",
         startDate: new Date(Date.now() + 86400000),

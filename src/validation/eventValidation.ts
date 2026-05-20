@@ -106,7 +106,6 @@ const eventBodyShape = z.object({
 
   refundPolicy: z.enum(["none", "flexible", "24h"]).default("none"),
   organizerType: z.enum(["individual", "business"]).default("individual"),
-  status: z.enum(["casual", "verified", "featured"]).default("casual"),
 });
 
 // 2. CREATE EVENT SCHEMA (With all refinements)
