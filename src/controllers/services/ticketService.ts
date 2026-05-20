@@ -262,43 +262,70 @@ export const processBooking = async (
   }
 };
 
-export const fulfillOrder = async (reference: string, metadata: any) => {
+export const fulfillOrder = async (
+  reference: string,
+  metadata: any,
+  isDelayedReconciliation = false,
+) => {
   logger.info(`Order Fulfillment Started: Ref=${reference}`);
 
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const order = await Order.findOne({ paymentReference: reference }).session(
-      session,
+    const order = await Order.findOneAndUpdate(
+      {
+        paymentReference: reference,
+        status: { $ne: ORDER_STATUS.COMPLETED },
+      },
+      {
+        $set: { status: ORDER_STATUS.COMPLETED },
+      },
+      {
+        session,
+        new: true,
+      },
     );
 
     if (!order) {
-      logger.error(`Fulfillment Failed: Ref ${reference} not found`);
+      const historicalOrder = await Order.findOne({
+        paymentReference: reference,
+      }).session(session);
+      if (historicalOrder?.status === ORDER_STATUS.COMPLETED) {
+        logger.warn(
+          `Fulfillment Skip: Ref ${reference} was handled by an parallel process.`,
+        );
+        await session.commitTransaction();
+        return;
+      }
+
       throw new AppError(
         httpStatus.NOT_FOUND,
         `Order with reference ${reference} not found`,
       );
     }
 
-    if (order.status === ORDER_STATUS.COMPLETED) {
-      logger.warn(`Fulfillment Skip: Ref ${reference} already completed`);
-      await session.commitTransaction();
-      return;
+    if (order.status === ORDER_STATUS.EXPIRED) {
+      await lockInventory(
+        order.event.toString(),
+        order.tierName,
+        order.quantity,
+        session,
+      );
+      // Bring order back from the grave
+      order.status = ORDER_STATUS.COMPLETED;
+      await order.save({ session });
     }
 
-    order.status = ORDER_STATUS.COMPLETED;
-    await order.save({ session });
-
+    // 3. Update User Metrics/Hype profiles safely
     if (order.user) {
       const user = await User.findById(order.user).session(session);
-
       if (user?.image) {
         await Event.updateOne(
           {
             _id: order.event,
             participantImages: { $ne: user.image },
-            $expr: { $lt: [{ $size: "$participantImages" }, 5] }, // Limit to 5 bubbles
+            $expr: { $lt: [{ $size: "$participantImages" }, 5] },
           },
           { $push: { participantImages: user.image } },
           { session },
@@ -306,6 +333,7 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
       }
     }
 
+    // 4. Ticket Building Asset Block
     const { tickets, eventImage } = await createTicketsForOrder(
       order,
       metadata,
@@ -314,15 +342,19 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
 
     await session.commitTransaction();
 
+    // 5. Fire side-effects outside database transaction boundary
     skauteEvents.emit("order.fulfilled", {
       order,
       tickets,
       eventImage,
+      isDelayedReconciliation,
     });
 
     logger.info(`Order Fulfilled Successfully: Ref=${reference}`);
   } catch (error: any) {
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     logger.error(
       `Order Fulfillment CRITICAL FAILURE: Ref=${reference} - ${error.message}`,
     );
@@ -331,7 +363,6 @@ export const fulfillOrder = async (reference: string, metadata: any) => {
     await session.endSession();
   }
 };
-
 /**
  * Validates and applies discount from the event's embedded array
  */

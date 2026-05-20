@@ -899,3 +899,13 @@ export const updateCoOrganizerPermissions = async (
 
   return updatedEvent;
 };
+
+export const getActiveEventsCount = async (): Promise<number> => {
+  const now = new Date();
+
+  const count = await Event.countDocuments({
+    endDate: { $gte: now },
+  });
+
+  return count;
+};

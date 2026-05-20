@@ -2,12 +2,12 @@ import { User, IUser } from "../../models/User.js";
 import httpStatus from "http-status";
 import AppError from "../../utils/AppError.js";
 import logger from "../../utils/logger.js"; // Import your winston logger
+import skauteEvents from "../../utils/eventsEmitter.js";
 
 export const createUser = async (userData: Partial<IUser>) => {
   const existingUser = await User.findOne({ email: userData.email });
 
   if (existingUser) {
-    // SECURITY LOG: Potential account takeover or confusion
     logger.warn(
       `Signup attempt failed: Email already exists - ${userData.email}`,
     );
@@ -25,6 +25,8 @@ export const createUser = async (userData: Partial<IUser>) => {
 
   // AUDIT LOG: Track new user growth
   logger.info(`User created successfully: ${newUser._id} - ${newUser.email}`);
+
+  skauteEvents.emit("user.signup", { user: newUser });
 
   return newUser;
 };

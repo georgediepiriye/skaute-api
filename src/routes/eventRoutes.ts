@@ -23,6 +23,7 @@ router.get("/", eventController.getAllEvents);
 router.get("/nearby", eventController.getNearbyEvents);
 router.get("/:id", eventController.getEvent);
 router.get("/slug/:slug", eventController.getEventBySlug);
+router.get("/count-active", eventController.getActiveMovesCount);
 router.post(
   "/:id/discounts/validate",
   validate(validateDiscountValidation),

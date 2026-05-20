@@ -1,11 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable no-console */
 import mongoose from "mongoose";
 import { faker } from "@faker-js/faker";
 import * as dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import { User } from "../models/User.js";
 import { Event, calculatePriorityScore } from "../models/Event.js";
-import { EVENT_CATEGORIES, EVENT_TYPES } from "../lib/constants.js";
+import Hotspot from "../models/Hotspot.js";
+import {
+  EVENT_CATEGORIES,
+  EVENT_TYPES,
+  HOTSPOT_CATEGORIES,
+} from "../lib/constants.js";
 
 dotenv.config();
 
@@ -34,6 +40,7 @@ const PH_NEIGHBORHOODS = [
   "Ada George",
   "Rumuokoro",
 ];
+
 const PH_BOUNDS = { latMin: 4.75, latMax: 4.9, lngMin: 6.95, lngMax: 7.1 };
 
 const TIER_TEMPLATES = [
@@ -44,16 +51,101 @@ const TIER_TEMPLATES = [
   ["General Admission", "Backstage Access"],
 ];
 
+const hotspotsData = [
+  // --- NIGHTLIFE & LOUNGE (High Energy) ---
+  {
+    title: "Casablanca Sports Bar",
+    category: HOTSPOT_CATEGORIES.nightlife.slug,
+    status: "HOT",
+    neighborhood: "GRA Phase 3",
+    coords: [6.978, 4.811],
+  },
+  {
+    title: "Asia Town",
+    category: HOTSPOT_CATEGORIES.lounge.slug,
+    status: "TRENDING",
+    neighborhood: "Old GRA",
+    coords: [7.011, 4.782],
+  },
+  {
+    title: "Sky Bar PH",
+    category: HOTSPOT_CATEGORIES.nightlife.slug,
+    status: "TRENDING",
+    neighborhood: "Genesis",
+    coords: [7.002, 4.835],
+  },
+
+  // --- DINING & CAFE (Culinary) ---
+  {
+    title: "Bole King",
+    category: HOTSPOT_CATEGORIES.dining.slug,
+    status: "HOT",
+    neighborhood: "Garrison",
+    coords: [6.9925, 4.8142],
+  },
+  {
+    title: "Native Tray",
+    category: HOTSPOT_CATEGORIES.dining.slug,
+    status: "ACTIVE",
+    neighborhood: "GRA",
+    coords: [6.982, 4.819],
+  },
+  {
+    title: "Vintage Cafe",
+    category: HOTSPOT_CATEGORIES.cafe.slug,
+    status: "CHILL",
+    neighborhood: "GRA Phase 2",
+    coords: [6.975, 4.815],
+  },
+
+  // --- WORKSPACE & ARTS (Productivity & Culture) ---
+  {
+    title: "Skaute Hub",
+    category: HOTSPOT_CATEGORIES.workspace.slug,
+    status: "ACTIVE",
+    neighborhood: "Trans Amadi",
+    coords: [7.032, 4.825],
+  },
+  {
+    title: "Rivers State Museum",
+    category: HOTSPOT_CATEGORIES.arts.slug,
+    status: "CHILL",
+    neighborhood: "Secretariat",
+    coords: [7.008, 4.785],
+  },
+
+  // --- WELLNESS & RETAIL (Active & Outdoors) ---
+  {
+    title: "PH Pleasure Park",
+    category: HOTSPOT_CATEGORIES.wellness.slug,
+    status: "TRENDING",
+    neighborhood: "Rumuola",
+    coords: [7.0094, 4.8239],
+  },
+  {
+    title: "Port Harcourt Mall",
+    category: HOTSPOT_CATEGORIES.retail.slug,
+    status: "ACTIVE",
+    neighborhood: "Azikiwe",
+    coords: [7.005, 4.7797],
+  },
+];
+
 async function seedDatabase() {
   try {
     const uri = process.env.DATABASE_URL || process.env.MONGO_URI;
     if (!uri) throw new Error("Database connection string missing in .env");
     await mongoose.connect(uri);
 
-    console.log("🧹 Cleaning database...");
+    console.log("🧹 Cleaning database collections...");
     await Event.deleteMany({});
     await User.deleteMany({});
+    await Hotspot.deleteMany({});
+    console.log("🗑️ Cleared existing Events, Users, and Hotspots.");
 
+    // ==========================================
+    // 1. SEED USERS
+    // ==========================================
     console.log("👤 Seeding users...");
     const hashedPassword = await bcrypt.hash("password123", 10);
     const userBatch = [
@@ -74,6 +166,9 @@ async function seedDatabase() {
     ];
     const createdUsers = await User.insertMany(userBatch);
 
+    // ==========================================
+    // 2. SEED EVENTS
+    // ==========================================
     const categoryKeys = Object.keys(EVENT_CATEGORIES);
     const typeKeys = Object.keys(EVENT_TYPES);
 
@@ -88,8 +183,6 @@ async function seedDatabase() {
       const isFeatured = Math.random() > 0.85;
       const isBoosted = Math.random() > 0.9;
       const isSoldOut = Math.random() > 0.85;
-
-      // 💡 NEW: ~7% chance this event is a platform owned/managed master move
       const isSkauteHosted = Math.random() > 0.93;
 
       const status: ("verified" | "featured")[] = [];
@@ -98,7 +191,6 @@ async function seedDatabase() {
 
       const boostExpiry = isBoosted ? faker.date.soon({ days: 7 }) : undefined;
 
-      // 💡 Updated calculation engine execution to natively account for platform-hosted weight
       const priorityLevel = calculatePriorityScore({
         status,
         isBoosted,
@@ -156,7 +248,6 @@ async function seedDatabase() {
         isSoldOut,
         boostExpiry,
 
-        // 💡 Platform metadata anchors
         isSkauteHosted,
         boostTier: isBoosted
           ? faker.helpers.arrayElement(["standard", "premium"])
@@ -258,16 +349,49 @@ async function seedDatabase() {
     });
 
     await Event.insertMany(eventBatch);
+    console.log("✅ Successfully seeded 100 high-quality events.");
 
-    console.log(
-      "🚀 Skaute Database Fully Seeded with Platform-Hosted Priority Engine Keys!",
-    );
-    console.log("----------------------------------");
-    console.log(
-      `Port Harcourt Status: ~7% Skaute Hosted Moves Assigned Priority +8`,
-    );
-    console.log("----------------------------------");
+    // ==========================================
+    // 3. SEED HOTSPOTS
+    // ==========================================
+    console.log("📍 Seeding Hotspots...");
+    const formattedHotspots = hotspotsData.map((h, index) => ({
+      title: h.title,
+      category: h.category,
+      status: h.status || "CHILL",
+      description: `Discover the best of Port Harcourt at ${h.title}. A top-rated ${h.category} destination in ${h.neighborhood} curated for the skaute community.`,
+      image: `https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80`,
+      gallery: [
+        `https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=60&sig=${index}1`,
+        `https://images.unsplash.com/photo-1574097656146-0b43b7660cb6?w=400&q=60&sig=${index}2`,
+        `https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=60&sig=${index}3`,
+        `https://images.unsplash.com/photo-1559333086-b0a56225a93c?w=400&q=60&sig=${index}4`,
+        `https://images.unsplash.com/photo-1514525253344-9914f255399c?w=400&q=60&sig=${index}5`,
+      ],
+      location: {
+        type: "Point",
+        coordinates: h.coords,
+        address: `${h.neighborhood}, Port Harcourt, Rivers State`,
+        neighborhood: h.neighborhood,
+        city: "Port Harcourt",
+        state: "Rivers State",
+      },
+      rating: parseFloat((Math.random() * (5 - 4.3) + 4.3).toFixed(1)),
+      bestTimeToVisit:
+        h.category === "nightlife" || h.category === "lounge"
+          ? "8:00 PM - Late"
+          : "10:00 AM - 7:00 PM",
+      isActive: true,
+    }));
 
+    await Hotspot.insertMany(formattedHotspots);
+    console.log(
+      `✅ Successfully seeded ${formattedHotspots.length} hotspots using exact constants!`,
+    );
+
+    console.log("\n----------------------------------");
+    console.log("🚀 Skaute Database Fully Seeded with Events & Hotspots!");
+    console.log("----------------------------------");
     process.exit(0);
   } catch (error) {
     console.error("❌ Seeding failed:", error);

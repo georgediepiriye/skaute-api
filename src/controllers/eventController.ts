@@ -281,6 +281,25 @@ export const getEventBySlug = async (
   }
 };
 
+export const getActiveMovesCount = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const count = await eventService.getActiveEventsCount();
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: {
+        count,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createDiscountCode = async (
   req: Request,
   res: Response,
