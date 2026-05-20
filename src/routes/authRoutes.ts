@@ -13,7 +13,6 @@ router.post("/signup", validate(signupSchema), authController.signup);
 router.post("/login", validate(loginSchema), authController.login);
 router.post("/logout", authController.logout);
 
-// 🔐 Secure endpoint
 router.get("/me", protect, authController.getMe);
 
 // 1. Redirect user to Google
@@ -26,7 +25,7 @@ router.get("/google", (req, res, next) => {
   passport.authenticate("google", {
     scope: ["profile", "email"],
     prompt: "select_account",
-    state: statePayload, // Google securely passes this exact string back to your /google/callback route
+    state: statePayload,
   })(req, res, next);
 });
 

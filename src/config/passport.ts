@@ -2,9 +2,8 @@ import passport from "passport";
 import { Strategy as GoogleStrategy, Profile } from "passport-google-oauth20";
 import { User } from "../models/User.js";
 import config from "./config.js";
+import skauteEvents from "../utils/eventsEmitter.js";
 
-// Use an intersection type (&) instead of 'extends'
-// This merges the standard Profile with our specific _json needs
 type GoogleProfile = Profile & {
   _json: {
     given_name?: string;
@@ -23,16 +22,20 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        // Cast to our combined type
         const googleProfile = profile as GoogleProfile;
 
         const email = googleProfile.emails?.[0].value;
-        const firstName =
-          googleProfile._json.given_name || googleProfile.name?.givenName;
-        const lastName =
-          googleProfile._json.family_name || googleProfile.name?.familyName;
 
-        // 1. Account Linking Logic
+        // Comprehensive fallback architecture for both fields
+        const firstName =
+          googleProfile.name?.givenName || googleProfile._json.given_name || "";
+
+        const lastName =
+          googleProfile.name?.familyName ||
+          googleProfile._json.family_name ||
+          "";
+
+        // Account Linking Logic
         let user = await User.findOne({
           $or: [{ googleId: googleProfile.id }, { email: email }],
         });
@@ -46,13 +49,19 @@ passport.use(
           return done(null, user);
         }
 
-        // 2. New User Creation
+        // Clean double-spaces if a particular name element didn't fetch cleanly
+        const finalName = `${firstName} ${lastName}`.trim() || "Google User";
+
+        // New User Creation
         user = await User.create({
           googleId: googleProfile.id,
-          name: `${firstName} ${lastName}`.trim(),
+          name: finalName,
           email: email,
           image: googleProfile.photos?.[0].value,
         });
+
+        // Trigger your global welcome emails via the event system
+        skauteEvents.emit("user.signup", { user });
 
         return done(null, user);
       } catch (err) {
