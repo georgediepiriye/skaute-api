@@ -19,6 +19,7 @@ export const validateCheckInSchema = z.object({
   }),
   body: z.object({
     checkInCode: z.string().min(5, "Invalid QR code format").trim(),
+    deviceFingerprint: z.string().trim().optional(),
   }),
 });
 

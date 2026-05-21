@@ -491,3 +491,112 @@ export const processManualPayoutCompletion = async (
 
   return payout;
 };
+
+export const getGateTelemetry = async (query: any) => {
+  // Aggregate real-time verification traffic checkpoints across event access gateways
+  const aggregateLogs = await Ticket.aggregate([
+    {
+      $match: {
+        status: TICKET_STATUS.used,
+        scannedAt: { $exists: true },
+      },
+    },
+    {
+      $group: {
+        _id: "$event",
+        totalScans: { $sum: 1 },
+        lastScanTime: { $max: "$scannedAt" },
+      },
+    },
+    { $sort: { lastScanTime: -1 } },
+    { $limit: 20 },
+  ]);
+
+  return await Event.populate(aggregateLogs, {
+    path: "_id",
+    select: "title location organizer",
+  });
+};
+
+export const getTelemetryDataset = async (eventId?: string) => {
+  const ticketMatchFilter: any = {};
+  if (eventId) {
+    ticketMatchFilter.event = eventId;
+  }
+
+  // 1. Resolve general counts
+  const [totalTicketsCount, checkedInCount] = await Promise.all([
+    Ticket.countDocuments(ticketMatchFilter),
+    Ticket.countDocuments({ ...ticketMatchFilter, status: TICKET_STATUS.used }),
+  ]);
+
+  // 2. Fetch trailing 50 scan records to generate live data feeds
+  const recentScansRaw = await Ticket.find({
+    ...ticketMatchFilter,
+    status: TICKET_STATUS.used,
+    scannedAt: { $exists: true },
+  })
+    .sort("-scannedAt")
+    .limit(50);
+
+  const liveFeed = recentScansRaw.map((t: any) => ({
+    ticketId: t._id.toString(),
+    guestName: t.metadata?.guestName || "General Guest",
+    tier: t.metadata?.ticketTier || "Standard Access",
+    code: t.secureCode || t._id.toString().substring(18).toUpperCase(),
+    deviceId: t.metadata?.scannedByDevice || "GATE-OMEGA",
+    timestamp: t.scannedAt || t.updatedAt,
+  }));
+
+  // 3. Aggregate device scan metrics to map out connected terminal devices
+  const terminalAggregation = await Ticket.aggregate([
+    {
+      $match: {
+        ...ticketMatchFilter,
+        status: TICKET_STATUS.used,
+        "metadata.scannedByDevice": { $exists: true },
+      },
+    },
+    {
+      $group: {
+        _id: "$metadata.scannedByDevice",
+        scanCount: { $sum: 1 },
+        lastActive: { $max: "$scannedAt" },
+        operatorName: { $first: "$metadata.operatorName" },
+      },
+    },
+  ]);
+
+  const terminals = terminalAggregation.map((term: any) => ({
+    deviceId: term._id || "UNKNOWN-HWID",
+    operatorName: term.operatorName || "Unassigned Gate Agent",
+    scanCount: term.scanCount || 0,
+    status:
+      Date.now() - new Date(term.lastActive).getTime() < 10 * 60 * 1000
+        ? "online"
+        : "offline",
+  }));
+
+  // Calculate sliding validation speed index (velocity metrics)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const internalScansLastHour = await Ticket.countDocuments({
+    ...ticketMatchFilter,
+    status: TICKET_STATUS.used,
+    scannedAt: { $gte: oneHourAgo },
+  });
+  const scansPerMinute = Math.ceil(internalScansLastHour / 60) || 0;
+
+  // Render schema framework payload output
+  return {
+    summary: {
+      verifiedCount: checkedInCount,
+      totalTicketsSold: totalTicketsCount,
+      activeDevicesCount: terminals.filter((t) => t.status === "online").length,
+      scansPerMinute,
+      fraudAlertsCount: 0, // Hook up your exact fraud collision tracker logic here
+    },
+    terminals,
+    fraudAlerts: [], // Populates into intercept banner UI component cleanly
+    liveFeed,
+  };
+};

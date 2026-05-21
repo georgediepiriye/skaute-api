@@ -279,10 +279,6 @@ export const completeManualPayout = async (
   }
 };
 
-/**
- * Updates an event's flags (verified, featured, boosted, skauteHosted)
- * PATCH /api/admin/events/:id/promotion
- */
 export const updateEventPromotion = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -322,5 +318,38 @@ export const updateEventPromotion = async (req: Request, res: Response) => {
       message: "Internal server error updating promotion state.",
       error: error.message,
     });
+  }
+};
+
+export const getGlobalTelemetry = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const data = await adminService.getTelemetryDataset();
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getEventTelemetry = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const eventId = req.params.eventId as string;
+    const data = await adminService.getTelemetryDataset(eventId);
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data,
+    });
+  } catch (error) {
+    next(error);
   }
 };

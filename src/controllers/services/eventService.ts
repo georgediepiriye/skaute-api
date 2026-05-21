@@ -909,3 +909,113 @@ export const getActiveEventsCount = async (): Promise<number> => {
 
   return count;
 };
+
+export const getGateControlTelemetryData = async (
+  eventId: string,
+  userId: string,
+) => {
+  // 1. Fetch Event and ensure it exists
+  const event = await Event.findById(eventId);
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
+
+  // 2. Privilege Validation Guard
+  const isOrganizer = event.organizer.toString() === userId;
+  const isCoOrganizer = event.coOrganizers?.some((coOrg: any) => {
+    const coOrgId = coOrg.user?.toString() || coOrg.toString();
+    return coOrgId === userId;
+  });
+
+  if (!isOrganizer && !isCoOrganizer) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "You do not possess security access clear privileges for this perimeter.",
+    );
+  }
+
+  // 3. Fetch all tickets for this event
+  const allTickets = await Ticket.find({ eventId });
+
+  // 4. Calculate core check-in totals
+  const totalTicketsSold = allTickets.length;
+  const checkedInTickets = allTickets.filter(
+    (t) => t.status === "used" || t.status === "checked-in",
+  );
+  const verifiedCount = checkedInTickets.length;
+  const remainingCount = Math.max(0, totalTicketsSold - verifiedCount);
+
+  // 5. Aggregate active physical devices & compile historical timelines
+  const activeDevices = new Set<string>();
+  const liveFeed: any[] = [];
+  const ticketScanRegistry: Record<string, string[]> = {};
+
+  // Sort checked-in passes descending by recent updates
+  const sortedCheckedIn = [...checkedInTickets].sort(
+    (a, b) =>
+      new Date(b.updatedAt || 0).getTime() -
+      new Date(a.updatedAt || 0).getTime(),
+  );
+
+  sortedCheckedIn.forEach((ticket: any) => {
+    const fingerprint = ticket.deviceFingerprint || "OFFLINE-TERM";
+    activeDevices.add(fingerprint);
+
+    const guestName = ticket.buyerInfo
+      ? `${ticket.buyerInfo.firstName} ${ticket.buyerInfo.lastName}`
+      : "Registered Guest";
+
+    liveFeed.push({
+      ticketId: ticket._id || ticket.id,
+      code: ticket.checkInCode,
+      guestName,
+      tier: ticket.tierName || "General Admission",
+      timestamp: ticket.updatedAt || Date.now(),
+      deviceId: fingerprint.substring(0, 13),
+    });
+
+    // Register signature logs to perform cross-terminal clone tests
+    if (!ticketScanRegistry[ticket.checkInCode]) {
+      ticketScanRegistry[ticket.checkInCode] = [];
+    }
+    ticketScanRegistry[ticket.checkInCode].push(fingerprint);
+  });
+
+  // 6. Multi-Device Collision Fraud Analysis Engine
+  const fraudAlerts: any[] = [];
+
+  for (const [code, devices] of Object.entries(ticketScanRegistry)) {
+    const uniqueDevices = new Set(devices);
+    if (devices.length > 1 && uniqueDevices.size > 1) {
+      const collisionTicket: any = allTickets.find(
+        (t) => t.checkInCode === code,
+      );
+      const guestName = collisionTicket?.buyerInfo
+        ? `${collisionTicket.buyerInfo.firstName} ${collisionTicket.buyerInfo.lastName}`
+        : "Unknown Attendee";
+
+      fraudAlerts.push({
+        type: "DUAL_DEVICE_COLLISION",
+        severity: "CRITICAL",
+        code,
+        guestName,
+        message: `Pass replicated! Ticket validation processed across ${uniqueDevices.size} distinct physical scanner machines.`,
+        timestamp: collisionTicket?.updatedAt || Date.now(),
+      });
+    }
+  }
+
+  // Sort security alert notifications descending by timestamp
+  fraudAlerts.sort((a, b) => b.timestamp - a.timestamp);
+
+  return {
+    summary: {
+      verifiedCount,
+      remainingCount,
+      activeDevicesCount: activeDevices.size,
+      fraudAlertsCount: fraudAlerts.length,
+    },
+    fraudAlerts: fraudAlerts.slice(0, 10),
+    liveFeed: liveFeed.slice(0, 25), // Returns the last 25 validation logs to preserve throughput
+  };
+};

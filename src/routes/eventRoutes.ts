@@ -80,6 +80,7 @@ router.delete(
 );
 
 router.patch("/:id/toggle-sold-out", eventController.toggleSoldOutStatus);
+router.get("/:eventId/gate-control", eventController.getGateControlTelemetry);
 
 // router.delete("/:id", eventController.deleteEvent);
 

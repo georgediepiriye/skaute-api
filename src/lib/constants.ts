@@ -187,6 +187,17 @@ export const TICKET_STATUS = {
   transferred: "transferred", //  Ticket forwarded to another user
 } as const;
 
+/**
+ * SCAN LOG STATUS
+ * Categorizing the result of every validation attempt at the door.
+ */
+export const SCAN_LOG_STATUS = {
+  SUCCESS: "success",
+  DUPLICATE: "duplicate",
+  INVALID_EVENT: "invalid_event",
+  REVOKED_TICKET: "revoked_ticket",
+} as const;
+
 export type skauteType = keyof typeof EVENT_TYPES;
 export type EventCategory = keyof typeof EVENT_CATEGORIES;
 export type HotspotCategory = keyof typeof HOTSPOT_CATEGORIES;
@@ -194,3 +205,5 @@ export type HotspotStatus = keyof typeof HOTSPOT_STATUS;
 export type TicketStatus = (typeof TICKET_STATUS)[keyof typeof TICKET_STATUS];
 export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
 export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
+export type ScanLogStatus =
+  (typeof SCAN_LOG_STATUS)[keyof typeof SCAN_LOG_STATUS];

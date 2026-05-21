@@ -11,7 +11,7 @@ router.get("/events", adminController.getModerationQueue);
 router.get("/events/:id", adminController.getEventPreview);
 router.patch("/events/:id/status", adminController.processApproval);
 
-//Dedicated promotional & curation control endpoint
+// Dedicated promotional & curation control endpoint
 router.patch("/events/:id/promotion", adminController.updateEventPromotion);
 
 // --- USER MANAGEMENT ENDPOINTS ---
@@ -25,5 +25,9 @@ router.get("/events/manage/:id", adminController.getEventManagementData);
 // --- PAYOUT & SETTLEMENT MANAGEMENT ENDPOINTS ---
 router.get("/payouts", adminController.getPayoutQueue);
 router.patch("/payouts/:id/complete", adminController.completeManualPayout);
+
+// --- TELEMETRY MANAGEMENT ENDPOINTS ---
+router.get("/telemetry/global", adminController.getGlobalTelemetry);
+router.get("/telemetry/events/:eventId", adminController.getEventTelemetry);
 
 export default router;

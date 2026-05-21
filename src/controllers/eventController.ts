@@ -432,3 +432,33 @@ export const updateCoOrganizerPermissions = async (
     next(error);
   }
 };
+
+export const getGateControlTelemetry = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const eventId = req.params.eventId as string;
+    const user = (req as any).user as IUser;
+
+    logger.info(
+      `Gate Control Telemetry Request: User=${user.email} EventID=${eventId}`,
+    );
+
+    const telemetryData = await eventService.getGateControlTelemetryData(
+      eventId,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: telemetryData,
+    });
+  } catch (error: any) {
+    logger.error(
+      `Gate Control Access Failed: ${error.message} | User=${(req as any).user?.email}`,
+    );
+    next(error);
+  }
+};

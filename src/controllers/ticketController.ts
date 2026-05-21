@@ -137,14 +137,19 @@ export const validateCheckIn = async (
   next: NextFunction,
 ) => {
   try {
-    const { checkInCode } = req.body;
+    const { checkInCode, deviceFingerprint } = req.body; //
     const { eventId } = req.params;
     const scannerId = (req as any).user.id;
+
+    // Fallback context validation check to catch device telemetry from headers if necessary
+    const activeDeviceFingerprint =
+      deviceFingerprint || (req.headers["x-device-fingerprint"] as string);
 
     const checkInData = await ticketService.processTicketCheckIn(
       checkInCode,
       eventId as string,
       scannerId,
+      activeDeviceFingerprint,
     );
 
     res.status(httpStatus.OK).json({
@@ -153,8 +158,6 @@ export const validateCheckIn = async (
       data: checkInData,
     });
   } catch (error: any) {
-    // Error is caught here and passed to your global error handler
-    // If it's a 409 or 404 from our service, it will have the correct status code
     next(error);
   }
 };

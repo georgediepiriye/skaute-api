@@ -3,12 +3,17 @@ import httpStatus from "http-status";
 import { nanoid } from "nanoid";
 import crypto from "node:crypto";
 import { Order } from "../../models/Order.js";
-import { ORDER_STATUS, TICKET_STATUS } from "../../lib/constants.js";
+import {
+  ORDER_STATUS,
+  SCAN_LOG_STATUS,
+  TICKET_STATUS,
+} from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
 import AppError from "../../utils/AppError.js";
 import { PaystackService } from "../../utils/paystackServices.js";
 import config from "../../config/config.js";
 import { Ticket } from "../../models/Ticket.js";
+import { ScanLog } from "../../models/ScanLog.js";
 import logger from "../../utils/logger.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
 import { User } from "../../models/User.js";
@@ -364,6 +369,7 @@ export const fulfillOrder = async (
     await session.endSession();
   }
 };
+
 /**
  * Validates and applies discount from the event's embedded array
  */
@@ -449,6 +455,7 @@ export const processTicketCheckIn = async (
   checkInCode: string,
   eventId: string,
   scannerId: string,
+  deviceFingerprint?: string,
 ) => {
   const event = await Event.findById(eventId)
     .select("organizer coOrganizers.user staff.user")
@@ -489,19 +496,34 @@ export const processTicketCheckIn = async (
     },
   ).populate("event", "title");
 
-  // 3. DETAILED EXCEPTION HANDLING
+  // 3. DETAILED EXCEPTION HANDLING WITH TELEMETRY LOGGING
   if (!ticket) {
     const existingTicket = await Ticket.findOne({
       checkInCode: sanitizedCode,
-      event: eventId,
     })
       .populate("event", "title")
       .lean();
 
+    // Context Exception 1: Code doesn't match any record in the cluster entirely
     if (!existingTicket) {
       throw new AppError(
         httpStatus.NOT_FOUND,
         "Invalid Ticket: QR code not recognized.",
+      );
+    }
+
+    // Context Exception 2: Ticket exists but was purchased for a different event profile entirely
+    if (existingTicket.event?._id?.toString() !== eventId) {
+      await ScanLog.create({
+        event: eventId,
+        ticket: existingTicket._id,
+        scanner: scannerId,
+        status: SCAN_LOG_STATUS.INVALID_EVENT,
+        deviceFingerprint,
+      });
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Security Violation: Ticket belongs to a completely different venue event.",
       );
     }
 
@@ -521,29 +543,41 @@ export const processTicketCheckIn = async (
       };
     }
 
+    // Context Exception 3: Duplicate Scan Detected (Already checked in earlier or at another door)
     if (existingTicket.status === TICKET_STATUS.used) {
+      await ScanLog.create({
+        event: eventId,
+        ticket: existingTicket._id,
+        scanner: scannerId,
+        status: SCAN_LOG_STATUS.DUPLICATE,
+        deviceFingerprint,
+      });
       throw new AppError(
         httpStatus.CONFLICT,
         `Already Used at ${new Date(existingTicket.checkedInAt).toLocaleTimeString()}`,
       );
     }
 
-    if (existingTicket.status === TICKET_STATUS.refunded) {
+    // Context Exception 4: Revoked, Refunded, Cancelled, or Transferred asset states
+    if (
+      existingTicket.status === TICKET_STATUS.refunded ||
+      existingTicket.status === TICKET_STATUS.cancelled ||
+      existingTicket.status === TICKET_STATUS.transferred
+    ) {
+      await ScanLog.create({
+        event: eventId,
+        ticket: existingTicket._id,
+        scanner: scannerId,
+        status: SCAN_LOG_STATUS.REVOKED_TICKET,
+        deviceFingerprint,
+      });
+
+      const trackingStatusName =
+        existingTicket.status.charAt(0).toUpperCase() +
+        existingTicket.status.slice(1);
       throw new AppError(
         httpStatus.BAD_REQUEST,
-        "Access Denied: Ticket has been Refunded.",
-      );
-    }
-    if (existingTicket.status === TICKET_STATUS.cancelled) {
-      throw new AppError(
-        httpStatus.BAD_REQUEST,
-        "Access Denied: Ticket has been Cancelled.",
-      );
-    }
-    if (existingTicket.status === TICKET_STATUS.transferred) {
-      throw new AppError(
-        httpStatus.BAD_REQUEST,
-        "Access Denied: Ticket has been Transferred.",
+        `Access Denied: Ticket has been ${trackingStatusName}.`,
       );
     }
 
@@ -552,6 +586,15 @@ export const processTicketCheckIn = async (
       "Ticket is invalid or inactive.",
     );
   }
+
+  // 4. LOG SUCCESSFUL CHECK-IN METRICS
+  await ScanLog.create({
+    event: eventId,
+    ticket: ticket._id,
+    scanner: scannerId,
+    status: SCAN_LOG_STATUS.SUCCESS,
+    deviceFingerprint,
+  });
 
   return {
     guestName: `${ticket.buyerInfo.firstName} ${ticket.buyerInfo.lastName}`,
@@ -687,9 +730,6 @@ export const processTicketRefund = async (ticketCode: string) => {
       { session },
     );
 
-    // =========================================================
-    // 🌟 PLACE B: INJECT TRANSACTION LEDGER LOG HERE
-    // =========================================================
     const grossRefundAmount = ticket.pricePaid;
 
     // Calculate your platform fee reversal using your commission structure (e.g., 10%)
