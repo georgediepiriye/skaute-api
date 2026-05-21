@@ -456,6 +456,7 @@ export const processTicketCheckIn = async (
   eventId: string,
   scannerId: string,
   deviceFingerprint?: string,
+  offlineTimestamp?: number,
 ) => {
   const event = await Event.findById(eventId)
     .select("organizer coOrganizers.user staff.user")
@@ -476,6 +477,10 @@ export const processTicketCheckIn = async (
 
   const sanitizedCode = checkInCode.trim().toUpperCase();
 
+  const exactCheckInTime = offlineTimestamp
+    ? new Date(offlineTimestamp)
+    : new Date();
+
   // 2. STRICT ATOMIC UPDATE
   const ticket = await Ticket.findOneAndUpdate(
     {
@@ -486,7 +491,7 @@ export const processTicketCheckIn = async (
     {
       $set: {
         status: TICKET_STATUS.used,
-        checkedInAt: new Date(),
+        checkedInAt: exactCheckInTime,
         checkedInBy: scannerId,
       },
     },
@@ -530,8 +535,11 @@ export const processTicketCheckIn = async (
     // IDEMPOTENCY LOGIC:
     const wasJustCheckedInByMe =
       existingTicket.status === TICKET_STATUS.used &&
-      existingTicket.checkedInBy?.toString() === scannerId &&
-      Date.now() - new Date(existingTicket.checkedInAt).getTime() < 120000;
+      (existingTicket.checkedInBy?.toString() === scannerId ||
+        existingTicket.deviceFingerprint === deviceFingerprint) &&
+      (offlineTimestamp
+        ? true
+        : Date.now() - new Date(existingTicket.checkedInAt).getTime() < 120000);
 
     if (wasJustCheckedInByMe) {
       return {
