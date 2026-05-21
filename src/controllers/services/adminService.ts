@@ -1,7 +1,9 @@
 import { ORDER_STATUS, TICKET_STATUS } from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
 import { Order } from "../../models/Order.js";
+import { Payout } from "../../models/Payout.js";
 import { Ticket } from "../../models/Ticket.js";
+import { Transaction } from "../../models/Transaction.js";
 import { User } from "../../models/User.js";
 
 export const getModerationQueue = async (query: any) => {
@@ -437,4 +439,55 @@ export const updateEventPromotionStatus = async (
   // 4. Critical Step: Save document instance to trigger .pre("save") hook calculation
   await event.save();
   return event;
+};
+
+export const getPayoutsList = async (query: any) => {
+  const page = Number(query.page) || 1;
+  const limit = Number(query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  // 1. DYNAMIC FILTER MATRIX
+  const filter: any = {};
+  if (query.status) filter.status = query.status; // "pending" | "completed"
+
+  // 2. CONCURRENT DATA & STAT COUNT RESOLUTION
+  const [payouts, totalPayoutsCount] = await Promise.all([
+    Payout.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Payout.countDocuments(filter),
+  ]);
+
+  return {
+    payouts,
+    pagination: {
+      totalPayouts: totalPayoutsCount,
+      totalPages: Math.ceil(totalPayoutsCount / limit),
+      page,
+      limit,
+    },
+  };
+};
+
+export const processManualPayoutCompletion = async (
+  id: string,
+  reference: string,
+) => {
+  const payout = await Payout.findOne({ _id: id, status: "pending" });
+  if (!payout) return null;
+
+  // 1. Update status tracking attributes
+  payout.status = "completed";
+  payout.paymentReference = reference;
+  payout.paidAt = new Date();
+
+  await payout.save();
+  await Transaction.create({
+    organizer: payout.organizer,
+    amount: payout.amount,
+    type: "payout",
+    status: "success",
+    reference: reference,
+    description: `Manual balance settlement clearance transfer to ${payout.bankDetails.accountName}`,
+  });
+
+  return payout;
 };

@@ -188,8 +188,6 @@ export const syncTickets = async (
   }
 };
 
-// controllers/ticketController.ts
-
 export const refundTicket = async (
   req: Request,
   res: Response,

@@ -13,6 +13,7 @@ import logger from "../../utils/logger.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
 import { User } from "../../models/User.js";
 import { Discount } from "../../models/Discount.js";
+import { Transaction } from "../../models/Transaction.js";
 
 /**
  * Locks inventory by incrementing the sold count only if capacity allows.
@@ -657,7 +658,7 @@ export const processTicketRefund = async (ticketCode: string) => {
       .populate("order")
       .session(session);
     if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
-    if (ticket.status === "refunded")
+    if (ticket.status === TICKET_STATUS.refunded)
       throw new AppError(httpStatus.BAD_REQUEST, "Already refunded");
 
     const order = ticket.order as any;
@@ -676,7 +677,7 @@ export const processTicketRefund = async (ticketCode: string) => {
     }
 
     // 3. Mark Ticket Refunded
-    ticket.status = "refunded";
+    ticket.status = TICKET_STATUS.refunded;
     await ticket.save({ session });
 
     // 4. Restore Inventory (Atomic decrement)
@@ -686,6 +687,41 @@ export const processTicketRefund = async (ticketCode: string) => {
       { session },
     );
 
+    // =========================================================
+    // 🌟 PLACE B: INJECT TRANSACTION LEDGER LOG HERE
+    // =========================================================
+    const grossRefundAmount = ticket.pricePaid;
+
+    // Calculate your platform fee reversal using your commission structure (e.g., 10%)
+    // Adjust the 0.10 multiplier to match your system's exact rake calculation
+    const platformFeeReversal = grossRefundAmount * 0.1;
+    const netAmountReversal = grossRefundAmount - platformFeeReversal;
+
+    // Pass the documents in an array so Mongoose can bind them to the session lifecycle
+    await Transaction.create(
+      [
+        {
+          user: order.user ? order.user.toString() : null, // Handle logged-in users vs guests
+          event: ticket.event.toString(),
+          type: "ticket_refund",
+          amount: -grossRefundAmount, // Negative deduction from overall ticket sales
+          fee: -platformFeeReversal, // Negative deduction from platform profit metrics
+          netAmount: -netAmountReversal, // Negative deduction from what organizer is owed
+          status: "success",
+          reference: `REFUND-${order.paymentReference}-${Date.now()}`,
+          metadata: {
+            originalPaymentReference: order.paymentReference,
+            ticketCode: ticketCode,
+            tierName: ticket.tierName,
+            buyerEmail: order.buyerEmail,
+            initiatedReason: "Admin/Organizer Initiated Refund",
+          },
+        },
+      ],
+      { session }, // 💥 Crucial: Binds this record creation to your transaction session
+    );
+
+    // Commit all changes together (Ticket Status + Event Inventory Counters + Transaction Log)
     await session.commitTransaction();
 
     // 5. Async Notification

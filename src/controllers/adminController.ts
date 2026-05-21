@@ -218,6 +218,67 @@ export const getEventManagementData = async (
   }
 };
 
+export const getPayoutQueue = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { payouts, pagination } = await adminService.getPayoutsList(
+      req.query,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      results: payouts.length,
+      pagination,
+      data: { payouts },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const completeManualPayout = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const { reference } = req.body; // Expects the manual banking receipt reference string
+
+    if (!reference) {
+      return res.status(httpStatus.BAD_REQUEST).json({
+        status: "error",
+        message:
+          "A payment reference string is strictly required to resolve a manual settlement trace.",
+      });
+    }
+
+    const completedPayout = await adminService.processManualPayoutCompletion(
+      id as string,
+      reference as string,
+    );
+
+    if (!completedPayout) {
+      return res.status(httpStatus.NOT_FOUND).json({
+        status: "error",
+        message:
+          "Payout record could not be found or has already been settled.",
+      });
+    }
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Payout ledger marked successful.",
+      data: { payout: completedPayout },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Updates an event's flags (verified, featured, boosted, skauteHosted)
  * PATCH /api/admin/events/:id/promotion

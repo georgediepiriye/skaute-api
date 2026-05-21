@@ -22,4 +22,8 @@ router.patch("/users/:id/verify", adminController.toggleUserVerification);
 router.get("/pulse", adminController.getPulseAnalytics);
 router.get("/events/manage/:id", adminController.getEventManagementData);
 
+// --- PAYOUT & SETTLEMENT MANAGEMENT ENDPOINTS ---
+router.get("/payouts", adminController.getPayoutQueue);
+router.patch("/payouts/:id/complete", adminController.completeManualPayout);
+
 export default router;
