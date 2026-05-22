@@ -137,7 +137,7 @@ export const validateCheckIn = async (
   next: NextFunction,
 ) => {
   try {
-    const { checkInCode, deviceFingerprint, offlineTimestamp } = req.body; //
+    const { checkInCode, deviceFingerprint, offlineTimestamp } = req.body;
     const { eventId } = req.params;
     const scannerId = (req as any).user.id;
 

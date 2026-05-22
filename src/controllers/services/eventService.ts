@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { CoOrganizerPermission, Event, IEvent } from "../../models/Event.js";
 import { Ticket } from "../../models/Ticket.js";
 import { User } from "../../models/User.js";
@@ -6,6 +6,7 @@ import AppError from "../../utils/AppError.js";
 import logger from "../../utils/logger.js";
 import httpStatus from "http-status";
 import { CreateDiscountInput } from "../../validation/eventValidation.js";
+import { ScanLog } from "../../models/ScanLog.js";
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -914,8 +915,13 @@ export const getGateControlTelemetryData = async (
   eventId: string,
   userId: string,
 ) => {
+  if (!Types.ObjectId.isValid(eventId)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid Event ID format");
+  }
+  const targetEventId = new Types.ObjectId(eventId);
+
   // 1. Fetch Event and ensure it exists
-  const event = await Event.findById(eventId);
+  const event = await Event.findById(targetEventId);
   if (!event) {
     throw new AppError(httpStatus.NOT_FOUND, "Event not found");
   }
@@ -934,21 +940,50 @@ export const getGateControlTelemetryData = async (
     );
   }
 
-  // 3. Fetch all tickets for this event
-  const allTickets = await Ticket.find({ eventId });
+  // 3. Fetch all tickets and live logs concurrently
+  const [allTickets, scanLogs] = await Promise.all([
+    Ticket.find({ event: targetEventId }).lean(),
+    ScanLog.find({ event: targetEventId }).sort({ scannedAt: -1 }).lean(),
+  ]);
 
-  // 4. Calculate core check-in totals
+  // Create a high-performance map lookup matching Ticket ID string -> Latest Device Fingerprint
+  const ticketFingerprintMap: Record<string, string> = {};
+  const ticketScanRegistry: Record<string, string[]> = {};
+
+  scanLogs.forEach((log) => {
+    const ticketIdStr = log.ticket.toString();
+    const fingerprint = log.deviceFingerprint || "OFFLINE-TERM";
+
+    // Track every device mapping that touched this ticket for collision detection
+    if (!ticketScanRegistry[ticketIdStr]) {
+      ticketScanRegistry[ticketIdStr] = [];
+    }
+    ticketScanRegistry[ticketIdStr].push(fingerprint);
+
+    // Keep the most recent scan device identifier as primary status
+    if (!ticketFingerprintMap[ticketIdStr]) {
+      ticketFingerprintMap[ticketIdStr] = fingerprint;
+    }
+  });
+
+  // 4. Calculate core check-in totals safely
   const totalTicketsSold = allTickets.length;
-  const checkedInTickets = allTickets.filter(
-    (t) => t.status === "used" || t.status === "checked-in",
-  );
+
+  const checkedInTickets = allTickets.filter((t) => {
+    const currentStatus = String(t.status).toLowerCase();
+    return (
+      currentStatus === "used" ||
+      currentStatus === "checked-in" ||
+      currentStatus === "checked_in"
+    );
+  });
+
   const verifiedCount = checkedInTickets.length;
   const remainingCount = Math.max(0, totalTicketsSold - verifiedCount);
 
   // 5. Aggregate active physical devices & compile historical timelines
   const activeDevices = new Set<string>();
   const liveFeed: any[] = [];
-  const ticketScanRegistry: Record<string, string[]> = {};
 
   // Sort checked-in passes descending by recent updates
   const sortedCheckedIn = [...checkedInTickets].sort(
@@ -958,7 +993,9 @@ export const getGateControlTelemetryData = async (
   );
 
   sortedCheckedIn.forEach((ticket: any) => {
-    const fingerprint = ticket.deviceFingerprint || "OFFLINE-TERM";
+    const ticketIdStr = ticket._id.toString();
+    // FIXED: Resolves fingerprint straight from the ScanLog mapping table instead of the blank ticket property
+    const fingerprint = ticketFingerprintMap[ticketIdStr] || "OFFLINE-TERM";
     activeDevices.add(fingerprint);
 
     const guestName = ticket.buyerInfo
@@ -966,47 +1003,47 @@ export const getGateControlTelemetryData = async (
       : "Registered Guest";
 
     liveFeed.push({
-      ticketId: ticket._id || ticket.id,
+      ticketId: ticketIdStr,
       code: ticket.checkInCode,
       guestName,
       tier: ticket.tierName || "General Admission",
       timestamp: ticket.updatedAt || Date.now(),
       deviceId: fingerprint.substring(0, 13),
     });
-
-    // Register signature logs to perform cross-terminal clone tests
-    if (!ticketScanRegistry[ticket.checkInCode]) {
-      ticketScanRegistry[ticket.checkInCode] = [];
-    }
-    ticketScanRegistry[ticket.checkInCode].push(fingerprint);
   });
 
   // 6. Multi-Device Collision Fraud Analysis Engine
   const fraudAlerts: any[] = [];
 
-  for (const [code, devices] of Object.entries(ticketScanRegistry)) {
+  // FIXED: Evaluates devices mapped against unique ticket IDs using real historical logs
+  for (const [ticketIdStr, devices] of Object.entries(ticketScanRegistry)) {
     const uniqueDevices = new Set(devices);
+
     if (devices.length > 1 && uniqueDevices.size > 1) {
       const collisionTicket: any = allTickets.find(
-        (t) => t.checkInCode === code,
+        (t) => t._id.toString() === ticketIdStr,
       );
-      const guestName = collisionTicket?.buyerInfo
+
+      if (!collisionTicket) continue;
+
+      const guestName = collisionTicket.buyerInfo
         ? `${collisionTicket.buyerInfo.firstName} ${collisionTicket.buyerInfo.lastName}`
         : "Unknown Attendee";
 
       fraudAlerts.push({
         type: "DUAL_DEVICE_COLLISION",
         severity: "CRITICAL",
-        code,
+        code: collisionTicket.checkInCode,
         guestName,
         message: `Pass replicated! Ticket validation processed across ${uniqueDevices.size} distinct physical scanner machines.`,
-        timestamp: collisionTicket?.updatedAt || Date.now(),
+        timestamp: collisionTicket.updatedAt || Date.now(),
       });
     }
   }
 
-  // Sort security alert notifications descending by timestamp
-  fraudAlerts.sort((a, b) => b.timestamp - a.timestamp);
+  fraudAlerts.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
 
   return {
     summary: {
@@ -1016,6 +1053,6 @@ export const getGateControlTelemetryData = async (
       fraudAlertsCount: fraudAlerts.length,
     },
     fraudAlerts: fraudAlerts.slice(0, 10),
-    liveFeed: liveFeed.slice(0, 25), // Returns the last 25 validation logs to preserve throughput
+    liveFeed: liveFeed.slice(0, 25),
   };
 };

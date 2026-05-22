@@ -1,7 +1,13 @@
-import { ORDER_STATUS, TICKET_STATUS } from "../../lib/constants.js";
+import mongoose from "mongoose";
+import {
+  ORDER_STATUS,
+  SCAN_LOG_STATUS,
+  TICKET_STATUS,
+} from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
 import { Order } from "../../models/Order.js";
 import { Payout } from "../../models/Payout.js";
+import { ScanLog } from "../../models/ScanLog.js";
 import { Ticket } from "../../models/Ticket.js";
 import { Transaction } from "../../models/Transaction.js";
 import { User } from "../../models/User.js";
@@ -493,12 +499,11 @@ export const processManualPayoutCompletion = async (
 };
 
 export const getGateTelemetry = async (query: any) => {
-  // Aggregate real-time verification traffic checkpoints across event access gateways
-  const aggregateLogs = await Ticket.aggregate([
+  // Aggregate real-time validation actions across active event spaces using ScanLog
+  const aggregateLogs = await ScanLog.aggregate([
     {
       $match: {
-        status: TICKET_STATUS.used,
-        scannedAt: { $exists: true },
+        status: SCAN_LOG_STATUS.SUCCESS, // Tracks valid admissions
       },
     },
     {
@@ -519,84 +524,137 @@ export const getGateTelemetry = async (query: any) => {
 };
 
 export const getTelemetryDataset = async (eventId?: string) => {
-  const ticketMatchFilter: any = {};
+  const filter: any = {};
   if (eventId) {
-    ticketMatchFilter.event = eventId;
+    filter.event = new mongoose.Types.ObjectId(eventId);
   }
 
-  // 1. Resolve general counts
+  // 1. Resolve general counts concurrently
   const [totalTicketsCount, checkedInCount] = await Promise.all([
-    Ticket.countDocuments(ticketMatchFilter),
-    Ticket.countDocuments({ ...ticketMatchFilter, status: TICKET_STATUS.used }),
+    Ticket.countDocuments(eventId ? { event: eventId } : {}),
+    Ticket.countDocuments({
+      ...(eventId ? { event: eventId } : {}),
+      status: TICKET_STATUS.used,
+    }),
   ]);
 
-  // 2. Fetch trailing 50 scan records to generate live data feeds
-  const recentScansRaw = await Ticket.find({
-    ...ticketMatchFilter,
-    status: TICKET_STATUS.used,
-    scannedAt: { $exists: true },
-  })
-    .sort("-scannedAt")
-    .limit(50);
+  // 2. Query ScanLogs to pull deep live feeds, terminal state statistics, and exceptions
+  const [recentLogs, terminalAggregation, fraudLogs] = await Promise.all([
+    // Live feed pipeline: Includes ticket metadata payloads by populating the referenced doc
+    ScanLog.find({ ...filter, status: SCAN_LOG_STATUS.SUCCESS })
+      .sort("-scannedAt")
+      .limit(50)
+      .populate("ticket", "buyerInfo tierName checkInCode")
+      .populate("scanner", "name email") // Populates who checked it in
+      .lean(),
 
-  const liveFeed = recentScansRaw.map((t: any) => ({
-    ticketId: t._id.toString(),
-    guestName: t.metadata?.guestName || "General Guest",
-    tier: t.metadata?.ticketTier || "Standard Access",
-    code: t.secureCode || t._id.toString().substring(18).toUpperCase(),
-    deviceId: t.metadata?.scannedByDevice || "GATE-OMEGA",
-    timestamp: t.scannedAt || t.updatedAt,
-  }));
+    // Target terminal hardware device counters
+    ScanLog.aggregate([
+      {
+        $match: {
+          ...filter,
+          deviceFingerprint: { $exists: true, $ne: "" },
+        },
+      },
+      {
+        $group: {
+          _id: "$deviceFingerprint",
+          scanCount: { $sum: 1 },
+          lastActive: { $max: "$scannedAt" },
+          // Pulls the name of the last staff user who operated this device fingerprint
+          lastOperatorId: { $last: "$scanner" },
+        },
+      },
+    ]),
 
-  // 3. Aggregate device scan metrics to map out connected terminal devices
-  const terminalAggregation = await Ticket.aggregate([
-    {
-      $match: {
-        ...ticketMatchFilter,
-        status: TICKET_STATUS.used,
-        "metadata.scannedByDevice": { $exists: true },
+    // Pull collision anomalies to process into the active threat array
+    ScanLog.find({
+      ...filter,
+      status: {
+        $in: [SCAN_LOG_STATUS.DUPLICATE, SCAN_LOG_STATUS.INVALID_EVENT],
       },
-    },
-    {
-      $group: {
-        _id: "$metadata.scannedByDevice",
-        scanCount: { $sum: 1 },
-        lastActive: { $max: "$scannedAt" },
-        operatorName: { $first: "$metadata.operatorName" },
-      },
-    },
+    })
+      .sort("-scannedAt")
+      .limit(30)
+      .populate("ticket", "buyerInfo checkInCode")
+      .lean(),
   ]);
 
-  const terminals = terminalAggregation.map((term: any) => ({
-    deviceId: term._id || "UNKNOWN-HWID",
-    operatorName: term.operatorName || "Unassigned Gate Agent",
-    scanCount: term.scanCount || 0,
-    status:
-      Date.now() - new Date(term.lastActive).getTime() < 10 * 60 * 1000
-        ? "online"
-        : "offline",
-  }));
+  // 3. Hydrate Terminal Operator identities if active hardware is detected
+  let terminals: any[] = [];
+  if (terminalAggregation.length > 0) {
+    terminals = await Event.populate(terminalAggregation, {
+      path: "lastOperatorId",
+      model: "User",
+      select: "name",
+    });
 
-  // Calculate sliding validation speed index (velocity metrics)
+    terminals = terminals.map((term: any) => ({
+      deviceId: term._id ? String(term._id).substring(0, 13) : "UNKNOWN-HWID",
+      operatorName: term.lastOperatorId?.name || "Gate Staff",
+      scanCount: term.scanCount || 0,
+      status:
+        Date.now() - new Date(term.lastActive).getTime() < 10 * 60 * 1000
+          ? "online"
+          : "offline",
+    }));
+  }
+
+  // 4. Transform native logs into cleanly mapped live analytics outputs
+  const liveFeed = recentLogs.map((log: any) => {
+    const t = log.ticket;
+    return {
+      ticketId: t?._id?.toString() || log.ticket?.toString(),
+      guestName: t?.buyerInfo
+        ? `${t.buyerInfo.firstName} ${t.buyerInfo.lastName}`
+        : "Registered Guest",
+      tier: t?.tierName || "Standard Access",
+      code: t?.checkInCode || "VERIFIED",
+      deviceId: log.deviceFingerprint
+        ? String(log.deviceFingerprint).substring(0, 13)
+        : "OFFLINE-TERM",
+      timestamp: log.scannedAt,
+    };
+  });
+
+  // 5. Structure active threat parameters into fraud panels
+  const fraudAlerts = fraudLogs.map((log: any) => {
+    const t = log.ticket;
+    return {
+      type: log.status,
+      severity:
+        log.status === SCAN_LOG_STATUS.DUPLICATE ? "CRITICAL" : "MEDIUM",
+      code: t?.checkInCode || "UNKNOWN_CODE",
+      guestName: t?.buyerInfo
+        ? `${t.buyerInfo.firstName} ${t.buyerInfo.lastName}`
+        : "Unknown Attendee",
+      message:
+        log.status === SCAN_LOG_STATUS.DUPLICATE
+          ? "Ticket duplication alert! Ticket reuse attempt rejected at gateway terminal."
+          : "Cross-venue scan mismatch! This pass belongs to an entirely different event perimeter.",
+      timestamp: log.scannedAt,
+    };
+  });
+
+  // 6. Sliding Entry Velocity calculation
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const internalScansLastHour = await Ticket.countDocuments({
-    ...ticketMatchFilter,
-    status: TICKET_STATUS.used,
+  const hourlyLogsCount = await ScanLog.countDocuments({
+    ...filter,
+    status: SCAN_LOG_STATUS.SUCCESS,
     scannedAt: { $gte: oneHourAgo },
   });
-  const scansPerMinute = Math.ceil(internalScansLastHour / 60) || 0;
+  const scansPerMinute = Math.ceil(hourlyLogsCount / 60) || 0;
 
-  // Render schema framework payload output
   return {
     summary: {
       verifiedCount: checkedInCount,
       totalTicketsSold: totalTicketsCount,
       activeDevicesCount: terminals.filter((t) => t.status === "online").length,
       scansPerMinute,
-      fraudAlertsCount: 0, // Hook up your exact fraud collision tracker logic here
+      fraudAlertsCount: fraudAlerts.length,
     },
     terminals,
-    fraudAlerts: [], // Populates into intercept banner UI component cleanly
+    fraudAlerts,
     liveFeed,
   };
 };

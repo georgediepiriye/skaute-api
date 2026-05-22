@@ -99,6 +99,7 @@ const createTicketsForOrder = async (
     const firstName =
       buyerDetails?.firstName || order?.buyerEmail?.split("@")[0] || "Guest";
     const lastName = buyerDetails?.lastName || "Attendee";
+
     ticketsToCreate.push({
       event: order.event,
       owner: order.user,
@@ -116,9 +117,7 @@ const createTicketsForOrder = async (
     });
   }
 
-  const tickets = await Ticket.insertMany(ticketsToCreate, {
-    session,
-  });
+  const tickets = await Ticket.create(ticketsToCreate, { session });
   const eventData = await Event.findById(order.event).session(session);
 
   return {
