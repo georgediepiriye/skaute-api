@@ -87,6 +87,23 @@ export const getMe = async (
 };
 
 export const logout = async (req: Request, res: Response) => {
+  const isProd = process.env.NODE_ENV === "production";
+
+  // Wipe the tokens from the HTTP headers if your backend uses HTTP-only cookies
+  res.clearCookie("skaute_token", {
+    path: "/",
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+  });
+
+  res.clearCookie("user_role", {
+    path: "/",
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+  });
+
   return res.status(200).json({
     status: "success",
     message: "Logged out successfully",
