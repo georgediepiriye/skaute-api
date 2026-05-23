@@ -210,7 +210,7 @@ export const getPulseMetrics = async () => {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  // Kivo Platform Business Core Mechanics: 10% Platform Commission
+  // Skaute Platform Business Core Mechanics: 10% Platform Commission
   const PLATFORM_COMMISSION_RATE = 0.1;
 
   const [
@@ -319,7 +319,7 @@ export const getPulseMetrics = async () => {
     finances: {
       totalRevenue: grossCompletedRevenue, // Platform Gross Processing Volume (GMV)
       pendingAmount: clearOrganizerEscrowPool, // Escrow balance to allocate to organizers
-      platformCommission: platformEarnings, // Kivo Net Take-Rate Earnings
+      platformCommission: platformEarnings, // Skaute Net Take-Rate Earnings
     },
 
     engagement: {

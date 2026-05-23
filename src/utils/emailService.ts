@@ -110,7 +110,7 @@ export const sendWelcomeEmail = async (to: string, name: string) => {
 
               <!-- Call to Action Button Component -->
               <div style="text-align: center; margin-bottom: 12px;">
-                <a href="https://kivo-isca.onrender.com/discover" style="background-color: ${SKAUTE_BLUE}; color: #FFFFFF; font-family: 'Arial Black', Impact, sans-serif; font-size: 12px; font-weight: bold; text-decoration: none; text-transform: uppercase; letter-spacing: 2px; padding: 16px 32px; border-radius: 16px; display: inline-block; box-shadow: 0 10px 20px -5px rgba(0, 82, 255, 0.4);">
+                <a href="https://skaute.onrender.com/discover" style="background-color: ${SKAUTE_BLUE}; color: #FFFFFF; font-family: 'Arial Black', Impact, sans-serif; font-size: 12px; font-weight: bold; text-decoration: none; text-transform: uppercase; letter-spacing: 2px; padding: 16px 32px; border-radius: 16px; display: inline-block; box-shadow: 0 10px 20px -5px rgba(0, 82, 255, 0.4);">
                   Discover Live Events
                 </a>
               </div>
