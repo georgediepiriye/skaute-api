@@ -277,7 +277,8 @@ const buildEventFilter = (
     isCancelled: false,
   };
 
-  // Text Search & Multi-Category
+  filter.endDate = { $gte: now };
+
   if (filter.title) filter.title = { $regex: filter.title, $options: "i" };
   if (queryObj.category?.includes(",")) {
     filter.category = { $in: queryObj.category.split(",") };
@@ -361,7 +362,7 @@ export const getAllEvents = async (query: EventFilterQuery) => {
   const filter = buildEventFilter(query, now);
 
   // Initialize and populate base mongoose execution query
-  let dbQuery = Event.find(filter).populate({
+  let dbQuery = Event.find(filter).select("-discounts").populate({
     path: "organizer",
     select: "name image location role",
   });
@@ -416,7 +417,7 @@ export const findNearbyEvents = async (
 };
 
 export const getEventById = async (id: string) => {
-  const event = await Event.findById(id).populate({
+  const event = await Event.findById(id).select("-discounts").populate({
     path: "organizer",
     select: "name image",
   });
@@ -636,10 +637,12 @@ export const removePartnerFromEvent = async (
 export const getEventBySlug = async (slug: string) => {
   const event = await Event.findOne({
     slug: slug,
-  }).populate({
-    path: "organizer",
-    select: "name image location",
-  });
+  })
+    .populate({
+      path: "organizer",
+      select: "name image location",
+    })
+    .select("-discounts");
 
   return event;
 };
@@ -861,7 +864,7 @@ export const updateCoOrganizerPermissions = async (
   userId: string,
 ) => {
   // 1. Fetch event framework explicitly
-  const event = await Event.findById(eventId);
+  const event = await Event.findById(eventId).select("-discounts");
   if (!event) {
     throw new AppError(httpStatus.NOT_FOUND, "Event / Move not found");
   }
@@ -921,7 +924,7 @@ export const getGateControlTelemetryData = async (
   const targetEventId = new Types.ObjectId(eventId);
 
   // 1. Fetch Event and ensure it exists
-  const event = await Event.findById(targetEventId);
+  const event = await Event.findById(targetEventId).select("-discounts");
   if (!event) {
     throw new AppError(httpStatus.NOT_FOUND, "Event not found");
   }
