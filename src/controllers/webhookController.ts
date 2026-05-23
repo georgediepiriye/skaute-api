@@ -5,13 +5,22 @@ import * as ticketService from "./services/ticketService.js";
 import config from "../config/config.js";
 import { Transaction } from "../models/Transaction.js";
 import { Order } from "../models/Order.js";
+import mongoose from "mongoose";
 
 export const handlePaystackWebhook = async (req: Request, res: Response) => {
   try {
-    // 1. Convert the raw binary buffer explicitly to an exact UTF-8 string
-    const rawBody = req.body.toString("utf8");
+    // 1. Handle body parsing safely regardless of middleware configuration
+    let rawBody: string;
+    if (Buffer.isBuffer(req.body)) {
+      rawBody = req.body.toString("utf8");
+    } else if (typeof req.body === "string") {
+      rawBody = req.body;
+    } else {
+      // Fallback if global middleware has already converted it to an object
+      rawBody = JSON.stringify(req.body);
+    }
 
-    // 2. Verify the signature using the raw string
+    // 2. Verify the signature using the resolved raw payload string
     const hash = crypto
       .createHmac("sha512", config.payments.paystackSecret!)
       .update(rawBody)
@@ -25,8 +34,7 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
     // 3. Safely parse the verified string into a JSON object
     const event = JSON.parse(rawBody);
 
-    // 4. Acknowledge receipt to Paystack IMMEDIATELY
-    // This prevents Paystack from timing out or retrying while your database processes the order
+    // 4. Acknowledge receipt to Paystack IMMEDIATELY to prevent retries
     res.status(httpStatus.OK).send("Webhook Received");
 
     // 5. Process the fulfillment details asynchronously
@@ -34,8 +42,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
       const { reference, amount, metadata } = event.data;
       console.log("🚀 Webhook received & verified for reference:", reference);
 
-      // We wrap the fulfillment and transaction logging call in a nested try/catch block
-      // so a database error won't crash the webhook execution flow or change the response status
       try {
         // Fetch order to guarantee data integrity across your collections
         const existingOrder = await Order.findOne({
@@ -43,7 +49,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
         });
 
         // Handle guest checking out anonymously context
-        // If metadata.userId is an empty string, undefined, or missing, fall back to existingOrder
         let finalUserId = null;
         if (metadata?.userId) {
           finalUserId = metadata.userId;
@@ -61,17 +66,17 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
           return;
         }
 
-        // B. Convert amount from Kobo to Naira (Paystack sends 500000 for ₦5,000)
+        // Convert amount from Kobo to Naira (Paystack sends 500000 for ₦5,000)
         const grossAmount = amount / 100;
 
-        // C. Calculate your Platform Split Fee (e.g., 10% commission rake)
+        // Calculate your Platform Split Fee (10% commission rake)
         const platformFee = grossAmount * 0.1;
         const netAmount = grossAmount - platformFee;
 
         // D. Record the immutable record of financial truth
         await Transaction.create({
-          user: finalUserId, // Safely saves as a string ID, or explicitly as null if guest checkout
-          event: finalEventId.toString(),
+          user: finalUserId || undefined, // Binds undefined if guest checkout to align with unrequired Schema option
+          event: new mongoose.Types.ObjectId(finalEventId.toString()),
           type: "ticket_sale",
           amount: grossAmount,
           fee: platformFee,
@@ -94,7 +99,7 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
           `💵 Transaction ledger logged successfully for ref: ${reference} (User: ${finalUserId || "GUEST"})`,
         );
 
-        // E. Complete structural ticket provisioning using standard fulfillment service flow
+        // E. 💡 FIXED: Call your unpacked function directly instead of using undefined ticketService object
         await ticketService.fulfillOrder(reference, metadata || {});
       } catch (fulfillError) {
         console.error(
@@ -105,7 +110,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error("❌ Webhook Outer Lifecycle Error:", error);
-    // If we haven't sent a response yet (e.g., JSON parsing failed), send a 500 error
     if (!res.headersSent) {
       res
         .status(httpStatus.INTERNAL_SERVER_ERROR)

@@ -210,6 +210,30 @@ export const processBooking = async (
         { session },
       );
 
+      // 💡 FIXED: Creates a 0-value ledger transaction record linked to this transaction session
+      await Transaction.create(
+        [
+          {
+            user: userId || null, // Saves as reference if logged in, otherwise cleanly handles anonymous guest checkout profiles
+            event: new mongoose.Types.ObjectId(eventId),
+            type: "ticket_sale",
+            amount: 0,
+            fee: 0,
+            netAmount: 0,
+            status: "success",
+            reference: order.paymentReference,
+            metadata: {
+              tierName,
+              quantity,
+              buyerEmail: userEmail.toLowerCase(),
+              isFreeBooking: true,
+              isGuestCheckout: !userId,
+            },
+          },
+        ],
+        { session },
+      );
+
       const { tickets, eventImage } = await createTicketsForOrder(
         order,
         buyerDetails,
@@ -740,7 +764,6 @@ export const processTicketRefund = async (ticketCode: string) => {
     const grossRefundAmount = ticket.pricePaid;
 
     // Calculate your platform fee reversal using your commission structure (e.g., 10%)
-    // Adjust the 0.10 multiplier to match your system's exact rake calculation
     const platformFeeReversal = grossRefundAmount * 0.1;
     const netAmountReversal = grossRefundAmount - platformFeeReversal;
 
@@ -750,7 +773,7 @@ export const processTicketRefund = async (ticketCode: string) => {
         {
           user: order.user ? order.user.toString() : null, // Handle logged-in users vs guests
           event: ticket.event.toString(),
-          type: "ticket_refund",
+          type: "refund", // 💡 FIXED: Matches the exact "refund" string configuration expected by the transaction schema enum validator
           amount: -grossRefundAmount, // Negative deduction from overall ticket sales
           fee: -platformFeeReversal, // Negative deduction from platform profit metrics
           netAmount: -netAmountReversal, // Negative deduction from what organizer is owed
@@ -765,7 +788,7 @@ export const processTicketRefund = async (ticketCode: string) => {
           },
         },
       ],
-      { session }, // 💥 Crucial: Binds this record creation to your transaction session
+      { session }, // Crucial: Binds this record creation to your transaction session
     );
 
     // Commit all changes together (Ticket Status + Event Inventory Counters + Transaction Log)

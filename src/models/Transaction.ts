@@ -14,7 +14,7 @@ export interface ITransaction extends Document {
 
 const transactionSchema = new Schema<ITransaction>(
   {
-    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    user: { type: Schema.Types.ObjectId, ref: "User", required: false }, // Not required to allow guest checkouts (null for guests)
     event: { type: Schema.Types.ObjectId, ref: "Event" },
     type: {
       type: String,
