@@ -254,9 +254,8 @@ const eventSchema = new Schema<IEvent>(
     ticketTiers: [ticketTierSchema],
     discounts: [discountSchema],
     totalCapacity: { type: Number, default: null },
-
     // Boosting Infrastructure fields
-    isSkauteHosted: { type: Boolean, default: false, index: true }, // 💡 Added database index targeting platform listings
+    isSkauteHosted: { type: Boolean, default: false, index: true },
     isBoosted: { type: Boolean, default: false, index: true },
     boostExpiry: { type: Date },
     boostTier: {
@@ -268,7 +267,6 @@ const eventSchema = new Schema<IEvent>(
     priorityLevel: { type: Number, default: 0, index: true },
     verifiedAt: { type: Date },
     featuredAt: { type: Date },
-
     isRecurring: { type: Boolean, default: false },
     recurrence: {
       frequency: {
@@ -281,7 +279,6 @@ const eventSchema = new Schema<IEvent>(
       endDate: { type: Date },
       parentId: { type: Schema.Types.ObjectId, ref: "Event", default: null },
     },
-
     joinLink: { type: String, trim: true },
     meetingLink: { type: String, trim: true },
     communityLink: { type: String, trim: true },
