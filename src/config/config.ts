@@ -55,13 +55,10 @@ const envVarsSchema = z
     CLOUDINARY_API_SECRET: z.string().describe("Cloudinary API secret"),
 
     // Logic/Taxation
-    skaute_TAX_PERCENTAGE: z
+    SKAUTE_FEE_PERCENT: z
       .string()
       .default("0.05")
-      .transform((num) => Number(num))
-      .refine((val) => val >= 0 && val <= 1, {
-        message: "Tax must be between 0 and 1 (0% to 100%)",
-      }),
+      .transform((num) => Number(num)),
   })
   .superRefine((data, ctx) => {
     if (
@@ -128,7 +125,7 @@ const config = {
   clientUrl: envVars.CLIENT_ORIGIN,
   apiUrl: envVars.API_URL,
   sendGridApiKey: envVars.SENDGRID_API_KEY,
-  tax: envVars.skaute_TAX_PERCENTAGE,
+  skauteFeePercent: envVars.SKAUTE_FEE_PERCENT,
   sentryDsn: envVars.SENTRY_DSN,
   resendApiKey: envVars.RESEND_API_KEY,
   googleOAuth: {

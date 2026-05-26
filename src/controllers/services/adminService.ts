@@ -449,26 +449,35 @@ export const updateEventPromotionStatus = async (
 
 export const getPayoutsList = async (query: any) => {
   const page = Number(query.page) || 1;
-  const limit = Number(query.limit) || 10;
+  const limit = Number(query.limit) || 20;
   const skip = (page - 1) * limit;
 
-  // 1. DYNAMIC FILTER MATRIX
   const filter: any = {};
-  if (query.status) filter.status = query.status; // "pending" | "completed"
 
-  // 2. CONCURRENT DATA & STAT COUNT RESOLUTION
-  const [payouts, totalPayoutsCount] = await Promise.all([
-    Payout.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+  if (query.status) {
+    filter.status = query.status;
+  }
+
+  const [payouts, total] = await Promise.all([
+    Payout.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("organizer", "name email")
+      .populate("event", "title")
+      .lean(),
+
     Payout.countDocuments(filter),
   ]);
 
   return {
     payouts,
+
     pagination: {
-      totalPayouts: totalPayoutsCount,
-      totalPages: Math.ceil(totalPayoutsCount / limit),
+      total,
       page,
       limit,
+      totalPages: Math.ceil(total / limit),
     },
   };
 };

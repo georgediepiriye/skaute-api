@@ -7,6 +7,8 @@ import logger from "../../utils/logger.js";
 import httpStatus from "http-status";
 import { CreateDiscountInput } from "../../validation/eventValidation.js";
 import { ScanLog } from "../../models/ScanLog.js";
+import { Payout } from "../../models/Payout.js";
+import config from "../../config/config.js";
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -435,80 +437,209 @@ export const getManagementDashboardData = async (
   page: number = 1,
   limit: number = 20,
 ) => {
-  // FIXED: Deep populate the nested user reference inside the coOrganizers array object
+  const SKAUTE_FEE_PERCENT = Number(config.skauteFeePercent) || 5.5;
+
+  /**
+   * EVENT LOOKUP
+   */
   const event = await Event.findById(eventId).populate({
     path: "coOrganizers.user",
     select: "name image email",
   });
 
-  if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
 
-  // Auth Check
+  /**
+   * AUTHORIZATION
+   */
   const isOwner = event.organizer.toString() === userId;
 
-  // FIXED: Inspect the nested user ID inside the sub-document structure
   const isCoOrg = event.coOrganizers?.some((coOrg: any) => {
     const coOrgUserId = coOrg.user?._id
       ? coOrg.user._id.toString()
       : coOrg.user?.toString();
+
     return coOrgUserId === userId;
   });
 
-  if (!isOwner && !isCoOrg)
+  if (!isOwner && !isCoOrg) {
     throw new AppError(httpStatus.FORBIDDEN, "Unauthorized");
+  }
 
-  // 1. Metrics Calculation (Still only valid/used for money/attendance)
+  /**
+   * ACTIVE TICKET FILTER
+   * ONLY VALID + USED COUNT AS REVENUE
+   */
+  const activeTicketFilter = {
+    event: new mongoose.Types.ObjectId(eventId),
+    status: { $in: ["valid", "used"] },
+  };
+
+  /**
+   * CORE METRICS
+   */
   const metricsData = await Ticket.aggregate([
     {
-      $match: {
-        event: new mongoose.Types.ObjectId(eventId),
-        status: { $in: ["valid", "used"] },
-      },
+      $match: activeTicketFilter,
     },
     {
       $group: {
         _id: null,
-        totalRevenue: { $sum: "$pricePaid" },
-        totalSold: { $sum: 1 },
-        checkInCount: { $sum: { $cond: [{ $eq: ["$status", "used"] }, 1, 0] } },
+
+        // TOTAL MONEY COLLECTED
+        grossRevenue: {
+          $sum: "$pricePaid",
+        },
+
+        // TOTAL ACTIVE TICKETS
+        totalSold: {
+          $sum: 1,
+        },
+
+        // TOTAL CHECKED IN
+        checkInCount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "used"] }, 1, 0],
+          },
+        },
       },
     },
   ]);
 
   const stats = metricsData[0] || {
-    totalRevenue: 0,
+    grossRevenue: 0,
     totalSold: 0,
     checkInCount: 0,
   };
 
-  // 2. Sales By Tier (Filtered for active sales)
-  const tierStats = await Ticket.aggregate([
+  /**
+   * PLATFORM FEE CALCULATIONS
+   */
+  const grossRevenue = Number(stats.grossRevenue || 0);
+
+  const platformFeeAmount = Number(
+    ((grossRevenue * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
+  );
+
+  const organizerNetRevenue = Number(
+    (grossRevenue - platformFeeAmount).toFixed(2),
+  );
+
+  /**
+   * PAYOUTS / SETTLEMENTS
+   */
+  const payoutAggregation = await Payout.aggregate([
     {
       $match: {
         event: new mongoose.Types.ObjectId(eventId),
-        status: { $in: ["valid", "used"] },
+        status: {
+          $in: ["pending", "processing", "completed"],
+        },
       },
     },
     {
       $group: {
+        _id: null,
+
+        totalPayoutRequested: {
+          $sum: "$amount",
+        },
+
+        totalPayoutCompleted: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "completed"] }, "$amount", 0],
+          },
+        },
+
+        totalPendingPayouts: {
+          $sum: {
+            $cond: [
+              {
+                $in: ["$status", ["pending", "processing"]],
+              },
+              "$amount",
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  const payoutStats = payoutAggregation[0] || {
+    totalPayoutRequested: 0,
+    totalPayoutCompleted: 0,
+    totalPendingPayouts: 0,
+  };
+
+  /**
+   * ORGANIZER AVAILABLE BALANCE
+   *
+   * NET REVENUE
+   * - COMPLETED PAYOUTS
+   * - PENDING PAYOUTS
+   */
+  const withdrawableBalance = Math.max(
+    organizerNetRevenue -
+      payoutStats.totalPayoutCompleted -
+      payoutStats.totalPendingPayouts,
+    0,
+  );
+
+  /**
+   * SALES BY TIER
+   */
+  const tierStats = await Ticket.aggregate([
+    {
+      $match: activeTicketFilter,
+    },
+    {
+      $group: {
         _id: "$tierName",
-        sold: { $sum: 1 },
-        revenue: { $sum: "$pricePaid" },
+
+        sold: {
+          $sum: 1,
+        },
+
+        grossRevenue: {
+          $sum: "$pricePaid",
+        },
       },
     },
   ]);
 
   const salesByTier = event.ticketTiers.map((tier: any) => {
     const stat = tierStats.find((s) => s._id === tier.name);
+
+    const tierGrossRevenue = Number(stat?.grossRevenue || 0);
+
+    const tierPlatformFee = Number(
+      ((tierGrossRevenue * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
+    );
+
+    const tierOrganizerRevenue = Number(
+      (tierGrossRevenue - tierPlatformFee).toFixed(2),
+    );
+
     return {
       name: tier.name,
       sold: stat?.sold || 0,
+
       capacity: tier.capacity,
-      revenue: stat?.revenue || 0,
+
+      grossRevenue: tierGrossRevenue,
+
+      platformFee: tierPlatformFee,
+
+      organizerRevenue: tierOrganizerRevenue,
     };
   });
 
-  // 3. Paginated Attendees (REMOVED STATUS FILTER)
+  /**
+   * ATTENDEES PAGINATION
+   */
   const skip = (page - 1) * limit;
 
   const [attendees, totalCount] = await Promise.all([
@@ -519,22 +650,57 @@ export const getManagementDashboardData = async (
       .populate("owner", "name image")
       .populate("checkedInBy", "name image")
       .lean(),
+
     Ticket.countDocuments({ event: eventId }),
   ]);
 
+  /**
+   * FINAL RESPONSE
+   */
   return {
     event,
+
     attendees,
+
     pagination: {
       total: totalCount,
       page,
       limit,
       totalPages: Math.ceil(totalCount / limit),
     },
+
     metrics: {
-      totalRevenue: stats.totalRevenue,
+      /**
+       * ATTENDANCE
+       */
       totalTicketsSold: stats.totalSold,
       checkInCount: stats.checkInCount,
+
+      /**
+       * MONEY
+       */
+      grossRevenue,
+
+      platformFeePercent: SKAUTE_FEE_PERCENT,
+
+      platformFeeAmount,
+
+      organizerNetRevenue,
+
+      /**
+       * PAYOUTS
+       */
+      totalPayoutRequested: payoutStats.totalPayoutRequested,
+
+      totalPayoutCompleted: payoutStats.totalPayoutCompleted,
+
+      totalPendingPayouts: payoutStats.totalPendingPayouts,
+
+      withdrawableBalance,
+
+      /**
+       * BREAKDOWN
+       */
       salesByTier,
     },
   };

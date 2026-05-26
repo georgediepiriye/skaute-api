@@ -72,3 +72,34 @@ export const requestPayout = async (
     next(error);
   }
 };
+
+export const getOrganizerPayouts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const userId = (req.user as any)?.id?.toString();
+
+    if (!userId) {
+      return next(
+        new AppError(
+          httpStatus.UNAUTHORIZED,
+          "Unauthorized operational context.",
+        ),
+      );
+    }
+
+    const payouts = await payoutService.getPayoutsByOrganizer(userId);
+
+    // Matches your established frontend response expectation: result.data.payouts
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: {
+        payouts,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

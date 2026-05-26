@@ -38,12 +38,14 @@ jobs:
           # Payments
           PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY }}
           PAYSTACK_BASE_API: https://api.paystack.co
+          PAYSTACK_FEE_PERCENTAGE: "0.015"
+          PAYSTACK_FEE_FIXED: "100"
 
           # Infrastructure
           REDIS_PUBLIC_URL: redis://localhost:6379
           CLIENT_ORIGIN: http://localhost:3000
           API_URL: http://localhost:5000
-          SKAUTE_TAX_PERCENTAGE: "0.05"
+          SKAUTE_FEE_PERCENTAGE: "0.05"
 
           # Third-party (Zod requires these strings)
           SENDGRID_API_KEY: SG.test_key

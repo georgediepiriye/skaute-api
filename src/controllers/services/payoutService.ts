@@ -3,6 +3,7 @@ import AppError from "../../utils/AppError.js";
 import { Event } from "../../models/Event.js";
 import { Payout } from "../../models/Payout.js";
 import { Ticket } from "../../models/Ticket.js";
+import config from "../../config/config.js";
 
 interface BankDetailsPayload {
   bankName: string;
@@ -19,14 +20,27 @@ export const createPayoutInstruction = async (
   amount: number,
   bankDetails: BankDetailsPayload,
 ) => {
-  // 1. Locate structural event scope
+  const SKAUTE_FEE_PERCENT = Number(config.skauteFeePercent) || 5.5;
+
+  /**
+   * =========================================
+   * EVENT LOOKUP
+   * =========================================
+   */
   const event = await Event.findById(eventId);
+
   if (!event) {
     throw new AppError(httpStatus.NOT_FOUND, "Target event entity not found.");
   }
 
-  // 2. Security Guard: Enforce strict host-only access (Exclude sub-scanners/co-organizers)
+  /**
+   * =========================================
+   * SECURITY CHECK
+   * ONLY MAIN ORGANIZER CAN WITHDRAW
+   * =========================================
+   */
   const isMainHost = event.organizer?.toString() === userId;
+
   if (!isMainHost) {
     throw new AppError(
       httpStatus.FORBIDDEN,
@@ -34,47 +48,165 @@ export const createPayoutInstruction = async (
     );
   }
 
-  // 3. Compute Financial Statements Real-Time Core Accumulations
-  // Aggregate absolute gross revenue from un-refunded valid tickets
-  const aggregateRevenue = await Ticket.aggregate([
-    { $match: { event: event._id, status: "valid" } }, // Matches TICKET_STATUS.valid configuration
-    { $group: { _id: null, total: { $sum: "$pricePaid" } } },
-  ]);
-  const totalEarnings = aggregateRevenue[0]?.total || 0;
+  /**
+   * =========================================
+   * VALIDATION
+   * =========================================
+   */
+  if (!amount || amount <= 0) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid payout amount.");
+  }
 
-  // Aggregate active pending/completed prior outflows attached to this financial bucket
-  const aggregatePriorPayouts = await Payout.aggregate([
+  /**
+   * =========================================
+   * REVENUE CALCULATION
+   * ONLY VALID + USED TICKETS COUNT
+   * =========================================
+   */
+  const revenueAggregation = await Ticket.aggregate([
     {
       $match: {
         event: event._id,
-        status: { $in: ["pending", "processing", "completed"] },
+        status: {
+          $in: ["valid", "used"],
+        },
       },
     },
-    { $group: { _id: null, total: { $sum: "$amount" } } },
+    {
+      $group: {
+        _id: null,
+
+        grossRevenue: {
+          $sum: "$pricePaid",
+        },
+      },
+    },
   ]);
-  const totalSettledOutflow = aggregatePriorPayouts[0]?.total || 0;
 
-  // Resolve current withdrawable volume capacity limits
-  const currentWithdrawableBalance = totalEarnings - totalSettledOutflow;
+  const grossRevenue = Number(revenueAggregation[0]?.grossRevenue || 0);
 
-  if (amount > currentWithdrawableBalance) {
+  /**
+   * =========================================
+   * PLATFORM FEE
+   * =========================================
+   *
+   * IMPORTANT:
+   * 5.5% of ₦20,000 = ₦1,100
+   *
+   * Formula:
+   * grossRevenue * (5.5 / 100)
+   */
+  const platformFeeAmount = Number(
+    (grossRevenue * (SKAUTE_FEE_PERCENT / 100)).toFixed(2),
+  );
+
+  /**
+   * =========================================
+   * ORGANIZER NET REVENUE
+   * =========================================
+   */
+  const organizerNetRevenue = Number(
+    (grossRevenue - platformFeeAmount).toFixed(2),
+  );
+
+  /**
+   * =========================================
+   * PRIOR PAYOUTS
+   * INCLUDE:
+   * - pending
+   * - processing
+   * - completed
+   * =========================================
+   */
+  const payoutAggregation = await Payout.aggregate([
+    {
+      $match: {
+        event: event._id,
+
+        status: {
+          $in: ["pending", "processing", "completed"],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+
+        totalPayouts: {
+          $sum: "$amount",
+        },
+      },
+    },
+  ]);
+
+  const totalPayouts = Number(payoutAggregation[0]?.totalPayouts || 0);
+
+  /**
+   * =========================================
+   * WITHDRAWABLE BALANCE
+   * =========================================
+   */
+  const withdrawableBalance = Math.max(organizerNetRevenue - totalPayouts, 0);
+
+  /**
+   * =========================================
+   * BALANCE CHECK
+   * =========================================
+   */
+  if (amount > withdrawableBalance) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
-      "Requested volume exceeds the currently available unallocated earnings pool.",
+      `Insufficient withdrawable balance. Available balance is ₦${withdrawableBalance.toLocaleString()}.`,
     );
   }
 
-  // 4. Secure Transaction Log Mapping Entry Execution
+  /**
+   * =========================================
+   * CREATE PAYOUT RECORD
+   * =========================================
+   */
   const newPayout = await Payout.create({
     organizer: userId,
+
     event: eventId,
+
     amount,
+
     bankDetails: {
       bankName: bankDetails.bankName,
       accountNumber: bankDetails.accountNumber,
       accountName: bankDetails.accountName,
     },
+
+    status: "pending",
   });
 
-  return newPayout;
+  /**
+   * =========================================
+   * RETURN
+   * =========================================
+   */
+  return {
+    payout: newPayout,
+
+    financials: {
+      grossRevenue,
+
+      platformFeePercent: SKAUTE_FEE_PERCENT,
+
+      platformFeeAmount,
+
+      organizerNetRevenue,
+
+      totalPayouts,
+
+      withdrawableBalance: withdrawableBalance - amount,
+    },
+  };
+};
+
+export const getPayoutsByOrganizer = async (userId: string) => {
+  return await Payout.find({ organizer: userId })
+    .sort({ requestedAt: -1, createdAt: -1 })
+    .populate("event", "title slug");
 };

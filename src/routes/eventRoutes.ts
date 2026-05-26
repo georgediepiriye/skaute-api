@@ -46,6 +46,7 @@ router.get(
   validate(eventIdParamSchema),
   eventController.getManagementDashboardData,
 );
+
 router.patch(
   "/:eventId/co-organizers",
   validate(addCoOrganizerSchema),
@@ -57,8 +58,6 @@ router.delete(
   validate(removeCoOrganizerSchema),
   eventController.removeCoOrganizer,
 );
-
-router.get("/slug/:slug", eventController.getEventBySlug);
 
 router.patch(
   "/:id/update-coorganizer-permissions",
