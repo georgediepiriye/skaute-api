@@ -1,24 +1,25 @@
+// models/Transaction.ts
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface ITransaction extends Document {
-  user: mongoose.Types.ObjectId; // Buyer (for ticket_sale/refund) OR Host (for payout)
-  event?: mongoose.Types.ObjectId; // Optional: context for ticket sales or payouts
-  type: "ticket_sale" | "refund" | "payout";
-  amount: number; // Total gross amount processed
-  fee: number; // Skaute's platform commission split
-  netAmount: number; // Amount after fees (gross - fee)
+  user: mongoose.Types.ObjectId;
+  event?: mongoose.Types.ObjectId;
+  type: "ticket_sale" | "gate_sale" | "refund" | "payout";
+  amount: number;
+  fee: number; // Skaute's 5.5% commission
+  netAmount: number; // For gate sales, this will be calculated as a negative debt (-fee)
   status: "pending" | "success" | "failed";
-  reference: string; // Paystack payment ref or  manual transfer bank reference
-  metadata?: any; // Save bank names, account numbers, or raw webhook payloads
+  reference: string;
+  metadata?: any;
 }
 
 const transactionSchema = new Schema<ITransaction>(
   {
-    user: { type: Schema.Types.ObjectId, ref: "User", required: false }, // Not required to allow guest checkouts (null for guests)
+    user: { type: Schema.Types.ObjectId, ref: "User", required: false },
     event: { type: Schema.Types.ObjectId, ref: "Event" },
     type: {
       type: String,
-      enum: ["ticket_sale", "refund", "payout"],
+      enum: ["ticket_sale", "gate_sale", "refund", "payout"],
       required: true,
     },
     amount: { type: Number, required: true },

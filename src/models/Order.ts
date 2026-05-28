@@ -12,6 +12,8 @@ export interface IOrder extends Document {
   paymentReference: string;
   paymentUrl: string;
   expiresAt: Date;
+  paymentMethod: "paystack" | "cash" | "transfer" | "pos" | "complimentary";
+  issuedBy?: mongoose.Types.ObjectId;
 }
 
 const orderSchema = new Schema<IOrder>(
@@ -39,11 +41,19 @@ const orderSchema = new Schema<IOrder>(
     paymentReference: { type: String, unique: true, required: true },
     paymentUrl: { type: String },
     expiresAt: { type: Date },
+    paymentMethod: {
+      type: String,
+      enum: ["paystack", "cash", "transfer", "pos", "complimentary"],
+      default: "paystack",
+      required: true,
+    },
+    issuedBy: { type: Schema.Types.ObjectId, ref: "User", required: false },
   },
   { timestamps: true },
 );
 
 orderSchema.index({ status: 1, expiresAt: 1 });
+orderSchema.index({ event: 1, paymentMethod: 1 });
 
 export const Order =
   mongoose.models.Order || mongoose.model<IOrder>("Order", orderSchema);

@@ -16,10 +16,9 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
     } else if (typeof req.body === "string") {
       rawBody = req.body;
     } else {
-      // Fallback if global middleware has already converted it to an object
       rawBody = JSON.stringify(req.body);
     }
-
+    console.log("Raw body extracted for signature verification.");
     // 2. Verify the signature using the resolved raw payload string
     const hash = crypto
       .createHmac("sha512", config.payments.paystackSecret!)
@@ -43,7 +42,7 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
       console.log("🚀 Webhook received & verified for reference:", reference);
 
       try {
-        // Fetch order to guarantee data integrity across your collections
+        // Fetch order to guarantee data integrity across collections
         const existingOrder = await Order.findOne({
           paymentReference: reference,
         });
@@ -69,13 +68,16 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
         // Convert amount from Kobo to Naira (Paystack sends 500000 for ₦5,000)
         const grossAmount = amount / 100;
 
-        // Calculate your Platform Split Fee (10% commission rake)
-        const platformFee = grossAmount * 0.1;
-        const netAmount = grossAmount - platformFee;
+        // Dynamic Skaute Fee configuration (Matches the 5.5% dashboard rule)
+        const SKAUTE_FEE_PERCENT = Number(config.skauteFeePercent) || 5.5;
+        const platformFee = Number(
+          ((grossAmount * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
+        );
+        const netAmount = Number((grossAmount - platformFee).toFixed(2));
 
-        // D. Record the immutable record of financial truth
+        // Record the immutable record of financial truth
         await Transaction.create({
-          user: finalUserId || undefined, // Binds undefined if guest checkout to align with unrequired Schema option
+          user: finalUserId || undefined,
           event: new mongoose.Types.ObjectId(finalEventId.toString()),
           type: "ticket_sale",
           amount: grossAmount,
@@ -91,6 +93,7 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
             tierName: metadata?.tierName || existingOrder?.tierName,
             quantity: metadata?.quantity || existingOrder?.quantity,
             buyerEmail: event.data.customer?.email || existingOrder?.buyerEmail,
+            isFreeBooking: false,
             isGuestCheckout: !finalUserId,
           },
         });
@@ -99,7 +102,7 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
           `💵 Transaction ledger logged successfully for ref: ${reference} (User: ${finalUserId || "GUEST"})`,
         );
 
-        // E. 💡 FIXED: Call your unpacked function directly instead of using undefined ticketService object
+        // Fulfill the tickets and emit notifications
         await ticketService.fulfillOrder(reference, metadata || {});
       } catch (fulfillError) {
         console.error(

@@ -12,6 +12,7 @@ import {
   deleteDiscountValidation,
   validateDiscountValidation,
   updateCoOrganizerPermissionsValidation,
+  issueManualTicketValidation,
 } from "../validation/eventValidation.js";
 import multer from "multer";
 const upload = multer({ storage: multer.memoryStorage() });
@@ -45,6 +46,12 @@ router.get(
   "/:id/manage",
   validate(eventIdParamSchema),
   eventController.getManagementDashboardData,
+);
+
+router.post(
+  "/:id/tickets/issue-manual",
+  validate(issueManualTicketValidation),
+  eventController.issueManualTicket,
 );
 
 router.patch(

@@ -34,8 +34,6 @@ export const lockInventory = async (
     `Inventory Lock Attempt: Event=${eventId} Tier=${tierName} Qty=${quantity}`,
   );
 
-  // 1. Find the event and the specific tier index first
-  // We do this to get the exact path for the atomic update
   const event = await Event.findOne({
     _id: eventId,
     "ticketTiers.name": tierName,
@@ -57,8 +55,7 @@ export const lockInventory = async (
   );
   const tier = event.ticketTiers[tierIndex];
 
-  // 2. Perform the Atomic Update
-  // We use the index to target the specific tier and check capacity in the query
+  // Perform the Atomic Update checking execution limitations
   const updatedEvent = await Event.findOneAndUpdate(
     {
       _id: eventId,
@@ -83,7 +80,9 @@ export const lockInventory = async (
       "Sold Out: The requested tickets are no longer available for this tier.",
     );
   }
-  return tier.price;
+
+  // Explicitly return casted Number representation
+  return Number(tier.price || 0);
 };
 
 const createTicketsForOrder = async (
@@ -140,16 +139,20 @@ export const processBooking = async (
   session.startTransaction();
 
   try {
-    // 1. Inventory & Price Sync
+    // 1. Inventory & Base Price Extraction
     const unitPrice = await lockInventory(eventId, tierName, quantity, session);
     const event = await Event.findById(eventId).session(session);
     if (!event)
       throw new AppError(httpStatus.NOT_FOUND, "Event data sync error");
 
+    // Cross-validate real tier configuration to stop pricing bypass structural defects
+    const matchedTier = event.ticketTiers.find((t: any) => t.name === tierName);
+    const fundamentalDatabasePrice = Number(matchedTier?.price || 0);
+
     let totalAmount = unitPrice * quantity;
     let appliedDiscountId = null;
 
-    // 2. Handle Discounts
+    // 2. Handle Coupon Deductions
     if (discountCode) {
       const result = await applyEventDiscount(
         event,
@@ -164,28 +167,35 @@ export const processBooking = async (
 
     totalAmount = Math.round(totalAmount);
 
-    // 3. Idempotency (Check for matching pending orders)
-    const existingOrder = await Order.findOne({
-      buyerEmail: userEmail.toLowerCase(),
-      event: eventId,
-      tierName,
-      totalAmount,
-      status: ORDER_STATUS.PENDING,
-      expiresAt: { $gt: new Date() },
-    }).session(session);
+    // Strict validation requirement checking if booking qualifies for absolute free routes
+    const isGenuinelyFree =
+      totalAmount === 0 && (fundamentalDatabasePrice === 0 || discountCode);
 
-    if (existingOrder && !discountCode) {
-      await session.abortTransaction();
-      return {
-        authorization_url: existingOrder.paymentUrl,
-        reference: existingOrder.paymentReference,
-      };
+    // 3. Idempotency Check (Only valid for paid routes to prevent overlapping pending sessions)
+    if (!isGenuinelyFree) {
+      const existingOrder = await Order.findOne({
+        buyerEmail: userEmail.toLowerCase(),
+        event: eventId,
+        tierName,
+        totalAmount,
+        status: ORDER_STATUS.PENDING,
+        expiresAt: { $gt: new Date() },
+      }).session(session);
+
+      if (existingOrder) {
+        await session.abortTransaction();
+        return {
+          isFree: false,
+          authorization_url: existingOrder.paymentUrl,
+          reference: existingOrder.paymentReference,
+        };
+      }
     }
 
-    // 4. Update Event Socials/Hype
+    // 4. Update Participant Metadata
     if (userId) await updateEventParticipantHype(eventId, userId, session);
 
-    // 5. Create Order Payload
+    // 5. Core Payload Configuration Setup
     const orderData = {
       user: userId || undefined,
       buyerEmail: userEmail.toLowerCase(),
@@ -197,8 +207,8 @@ export const processBooking = async (
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
     };
 
-    // 6. Execution: Free vs Paid
-    if (totalAmount === 0) {
+    // 6. Branch Execution Strategy: Free Execution Stack
+    if (isGenuinelyFree) {
       const [order] = await Order.create(
         [
           {
@@ -210,11 +220,10 @@ export const processBooking = async (
         { session },
       );
 
-      // 💡 FIXED: Creates a 0-value ledger transaction record linked to this transaction session
       await Transaction.create(
         [
           {
-            user: userId || null, // Saves as reference if logged in, otherwise cleanly handles anonymous guest checkout profiles
+            user: userId || null,
             event: new mongoose.Types.ObjectId(eventId),
             type: "ticket_sale",
             amount: 0,
@@ -239,9 +248,10 @@ export const processBooking = async (
         buyerDetails,
         session,
       );
-      await session.commitTransaction();
 
+      await session.commitTransaction();
       skauteEvents.emit("order.fulfilled", { order, tickets, eventImage });
+
       return {
         isFree: true,
         reference: order.paymentReference,
@@ -249,10 +259,17 @@ export const processBooking = async (
       };
     }
 
-    // Paid Flow
+    // 7. Branch Execution Strategy: Paid Gateway Stack
+    if (totalAmount <= 0) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Invalid transactional sum calculated for a paid asset tier.",
+      );
+    }
+
     const payment = await PaystackService.initializeTransaction({
       email: userEmail,
-      amount: totalAmount * 100,
+      amount: totalAmount * 100, // Conversion parameters into Kobo denominations
       callback_url: `${config.clientUrl}/verify-payment`,
       metadata: {
         userId,
@@ -271,6 +288,7 @@ export const processBooking = async (
           ...orderData,
           paymentReference: payment.data.reference,
           paymentUrl: payment.data.authorization_url,
+          status: ORDER_STATUS.PENDING,
         },
       ],
       { session },
@@ -322,7 +340,7 @@ export const fulfillOrder = async (
       }).session(session);
       if (historicalOrder?.status === ORDER_STATUS.COMPLETED) {
         logger.warn(
-          `Fulfillment Skip: Ref ${reference} was handled by an parallel process.`,
+          `Fulfillment Skip: Ref ${reference} was handled by a parallel process.`,
         );
         await session.commitTransaction();
         return;
@@ -341,12 +359,10 @@ export const fulfillOrder = async (
         order.quantity,
         session,
       );
-      // Bring order back from the grave
       order.status = ORDER_STATUS.COMPLETED;
       await order.save({ session });
     }
 
-    // 3. Update User Metrics/Hype profiles safely
     if (order.user) {
       const user = await User.findById(order.user).session(session);
       if (user?.image) {
@@ -362,16 +378,13 @@ export const fulfillOrder = async (
       }
     }
 
-    // 4. Ticket Building Asset Block
     const { tickets, eventImage } = await createTicketsForOrder(
       order,
       metadata,
       session,
     );
-
     await session.commitTransaction();
 
-    // 5. Fire side-effects outside database transaction boundary
     skauteEvents.emit("order.fulfilled", {
       order,
       tickets,
@@ -381,9 +394,7 @@ export const fulfillOrder = async (
 
     logger.info(`Order Fulfilled Successfully: Ref=${reference}`);
   } catch (error: any) {
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
+    if (session.inTransaction()) await session.abortTransaction();
     logger.error(
       `Order Fulfillment CRITICAL FAILURE: Ref=${reference} - ${error.message}`,
     );
@@ -467,7 +478,6 @@ export const getTicketById = async (ticketId: string) => {
     select: "title startDate location image",
   });
 
-  console.log(ticket, "Fetched Ticket Details"); // Debug log to verify ticket retrieval
   if (!ticket) {
     throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
   }

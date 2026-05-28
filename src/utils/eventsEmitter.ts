@@ -34,21 +34,39 @@ const handleUserSignup = async ({ user }: { user: any }) => {
 /**
  * Handle Order Fulfillment (Success)
  */
+
 const handleOrderFulfilled = async ({
   order,
   tickets,
   eventImage,
+  isManualPlacement = false, // Default to false for regular checkouts
 }: {
   order: any;
   tickets: any[];
   eventImage: string;
+  isManualPlacement?: boolean;
 }) => {
   try {
-    logger.info(`Background: Sending tickets for Order ${order._id}`);
+    if (isManualPlacement) {
+      logger.info(
+        `Background: Processing Manual Complimentary Pass distribution for Event ${order.event} to ${order.buyerEmail}`,
+      );
+    } else {
+      logger.info(
+        `Background: Sending tickets for Standard Purchase Order ${order._id}`,
+      );
+    }
+
+    // Both streams share the exact same asset delivery utility safely
     await sendTicketEmail(order.buyerEmail, tickets, eventImage);
-    logger.info(`Background: Email sent successfully to ${order.buyerEmail}`);
+
+    logger.info(
+      `Background: Ticket delivery email sent successfully to ${order.buyerEmail}`,
+    );
   } catch (error: any) {
-    logger.error(`Background Error: Failed to send email: ${error.message}`);
+    logger.error(
+      `Background Error: Failed to execute ticket delivery: ${error.message}`,
+    );
   }
 };
 

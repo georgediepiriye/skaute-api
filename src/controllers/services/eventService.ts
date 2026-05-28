@@ -10,6 +10,11 @@ import { ScanLog } from "../../models/ScanLog.js";
 import { Payout } from "../../models/Payout.js";
 import config from "../../config/config.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
+import { lockInventory } from "./ticketService.js";
+import crypto from "node:crypto";
+import { ORDER_STATUS } from "../../lib/constants.js";
+import { Order } from "../../models/Order.js";
+import { Transaction } from "../../models/Transaction.js";
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -441,7 +446,7 @@ export const getManagementDashboardData = async (
   const SKAUTE_FEE_PERCENT = Number(config.skauteFeePercent) || 5.5;
 
   /**
-   * EVENT LOOKUP
+   * 1. EVENT LOOKUP & VALIDATION
    */
   const event = await Event.findById(eventId).populate({
     path: "coOrganizers.user",
@@ -453,7 +458,7 @@ export const getManagementDashboardData = async (
   }
 
   /**
-   * AUTHORIZATION
+   * 2. SECURITY & AUTHORIZATION CHECK
    */
   const isOwner = event.organizer.toString() === userId;
 
@@ -466,12 +471,15 @@ export const getManagementDashboardData = async (
   });
 
   if (!isOwner && !isCoOrg) {
-    throw new AppError(httpStatus.FORBIDDEN, "Unauthorized");
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Unauthorized access to dashboard",
+    );
   }
 
   /**
-   * ACTIVE TICKET FILTER
-   * ONLY VALID + USED COUNT AS REVENUE
+   * 3. ACTIVE TICKET FILTER
+   * Validates standard attendance statuses
    */
   const activeTicketFilter = {
     event: new mongoose.Types.ObjectId(eventId),
@@ -479,87 +487,105 @@ export const getManagementDashboardData = async (
   };
 
   /**
-   * CORE METRICS
+   * 4. QUANTITY & ATTENDANCE METRICS
    */
   const metricsData = await Ticket.aggregate([
-    {
-      $match: activeTicketFilter,
-    },
+    { $match: activeTicketFilter },
     {
       $group: {
         _id: null,
-
-        // TOTAL MONEY COLLECTED
-        grossRevenue: {
-          $sum: "$pricePaid",
-        },
-
-        // TOTAL ACTIVE TICKETS
-        totalSold: {
-          $sum: 1,
-        },
-
-        // TOTAL CHECKED IN
+        totalSold: { $sum: 1 },
         checkInCount: {
-          $sum: {
-            $cond: [{ $eq: ["$status", "used"] }, 1, 0],
-          },
+          $sum: { $cond: [{ $eq: ["$status", "used"] }, 1, 0] },
         },
       },
     },
   ]);
 
-  const stats = metricsData[0] || {
-    grossRevenue: 0,
-    totalSold: 0,
-    checkInCount: 0,
-  };
+  const stats = metricsData[0] || { totalSold: 0, checkInCount: 0 };
 
   /**
-   * PLATFORM FEE CALCULATIONS
+   * 5. FINANCIAL RECONCILIATION ENGINE
+   * Separates Online Gateway Revenue from Physical Gate Cash Sales
    */
-  const grossRevenue = Number(stats.grossRevenue || 0);
-
-  const platformFeeAmount = Number(
-    ((grossRevenue * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
-  );
-
-  const organizerNetRevenue = Number(
-    (grossRevenue - platformFeeAmount).toFixed(2),
-  );
-
-  /**
-   * PAYOUTS / SETTLEMENTS
-   */
-  const payoutAggregation = await Payout.aggregate([
+  const transactionStats = await Transaction.aggregate([
     {
       $match: {
         event: new mongoose.Types.ObjectId(eventId),
-        status: {
-          $in: ["pending", "processing", "completed"],
-        },
+        status: "success",
       },
     },
     {
       $group: {
         _id: null,
-
-        totalPayoutRequested: {
-          $sum: "$amount",
+        // Gross Online Sales processed by Skaute's payment gateway
+        grossOnlineRevenue: {
+          $sum: { $cond: [{ $eq: ["$type", "ticket_sale"] }, "$amount", 0] },
         },
+        // Fees accumulated via online sales
+        onlinePlatformFees: {
+          $sum: { $cond: [{ $eq: ["$type", "ticket_sale"] }, "$fee", 0] },
+        },
+        // Physical cash / private POS processed on-premise at the venue gate
+        grossGateRevenue: {
+          $sum: { $cond: [{ $eq: ["$type", "gate_sale"] }, "$amount", 0] },
+        },
+        // Platform commission debts generated from gate sales
+        gatePlatformFees: {
+          $sum: { $cond: [{ $eq: ["$type", "gate_sale"] }, "$fee", 0] },
+        },
+        // Balance ledger pool (Online sales minus total accumulated platform commissions)
+        totalNetFromTransactions: { $sum: "$netAmount" },
+      },
+    },
+  ]);
 
+  const financialLedger = transactionStats[0] || {
+    grossOnlineRevenue: 0,
+    onlinePlatformFees: 0,
+    grossGateRevenue: 0,
+    gatePlatformFees: 0,
+    totalNetFromTransactions: 0,
+  };
+
+  // Maps properties to standard predictable variables
+  const grossRevenue = Number(financialLedger.grossOnlineRevenue.toFixed(2));
+  const grossGateRevenue = Number(financialLedger.grossGateRevenue.toFixed(2));
+  const totalPlatformFeeAmount = Number(
+    (
+      financialLedger.onlinePlatformFees + financialLedger.gatePlatformFees
+    ).toFixed(2),
+  );
+
+  // What the organizer pocketed net across all streams (Online Net + Offline Cash - Skaute Fees)
+  const organizerTotalNetRevenue = Math.max(
+    Number(
+      (grossRevenue + grossGateRevenue - totalPlatformFeeAmount).toFixed(2),
+    ),
+    0,
+  );
+
+  /**
+   * 6. PAYOUTS / SETTLEMENTS LEDGER
+   */
+  const payoutAggregation = await Payout.aggregate([
+    {
+      $match: {
+        event: new mongoose.Types.ObjectId(eventId),
+        status: { $in: ["pending", "processing", "completed"] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalPayoutRequested: { $sum: "$amount" },
         totalPayoutCompleted: {
-          $sum: {
-            $cond: [{ $eq: ["$status", "completed"] }, "$amount", 0],
-          },
+          $sum: { $cond: [{ $eq: ["$status", "completed"] }, "$amount", 0] },
         },
-
         totalPendingPayouts: {
           $sum: {
             $cond: [
-              {
-                $in: ["$status", ["pending", "processing"]],
-              },
+              { $in: ["$status", ["pending", "processing"]] },
               "$amount",
               0,
             ],
@@ -576,50 +602,40 @@ export const getManagementDashboardData = async (
   };
 
   /**
-   * ORGANIZER AVAILABLE BALANCE
-   *
-   * NET REVENUE
-   * - COMPLETED PAYOUTS
-   * - PENDING PAYOUTS
+   * 7. ORGANIZER WITHDRAWABLE BALANCE MATH
+   * Net transaction balance (Online Gross - Total System Fees) minus bank payouts processed/pending
    */
   const withdrawableBalance = Math.max(
-    organizerNetRevenue -
-      payoutStats.totalPayoutCompleted -
-      payoutStats.totalPendingPayouts,
+    Number(
+      (
+        financialLedger.totalNetFromTransactions -
+        payoutStats.totalPayoutCompleted -
+        payoutStats.totalPendingPayouts
+      ).toFixed(2),
+    ),
     0,
   );
 
   /**
-   * SALES BY TIER
+   * 8. QUANTITY AND VALUE SALES BY TIER
    */
   const tierStats = await Ticket.aggregate([
-    {
-      $match: activeTicketFilter,
-    },
+    { $match: activeTicketFilter },
     {
       $group: {
         _id: "$tierName",
-
-        sold: {
-          $sum: 1,
-        },
-
-        grossRevenue: {
-          $sum: "$pricePaid",
-        },
+        sold: { $sum: 1 },
+        grossRevenue: { $sum: "$pricePaid" },
       },
     },
   ]);
 
   const salesByTier = event.ticketTiers.map((tier: any) => {
     const stat = tierStats.find((s) => s._id === tier.name);
-
     const tierGrossRevenue = Number(stat?.grossRevenue || 0);
-
     const tierPlatformFee = Number(
       ((tierGrossRevenue * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
     );
-
     const tierOrganizerRevenue = Number(
       (tierGrossRevenue - tierPlatformFee).toFixed(2),
     );
@@ -627,19 +643,15 @@ export const getManagementDashboardData = async (
     return {
       name: tier.name,
       sold: stat?.sold || 0,
-
       capacity: tier.capacity,
-
       grossRevenue: tierGrossRevenue,
-
       platformFee: tierPlatformFee,
-
       organizerRevenue: tierOrganizerRevenue,
     };
   });
 
   /**
-   * ATTENDEES PAGINATION
+   * 9. GUEST LIST ATTENDEES PAGINATION
    */
   const skip = (page - 1) * limit;
 
@@ -648,7 +660,7 @@ export const getManagementDashboardData = async (
       .sort("-createdAt")
       .skip(skip)
       .limit(limit)
-      .populate("owner", "name image")
+      .populate("owner", "name image email")
       .populate("checkedInBy", "name image")
       .lean(),
 
@@ -656,51 +668,43 @@ export const getManagementDashboardData = async (
   ]);
 
   /**
-   * FINAL RESPONSE
+   * 10. FINAL STRUCK STRUCTURAL RESPONSE
    */
   return {
     event,
-
     attendees,
-
     pagination: {
       total: totalCount,
       page,
       limit,
       totalPages: Math.ceil(totalCount / limit),
     },
-
     metrics: {
       /**
-       * ATTENDANCE
+       * QUANTITIES
        */
       totalTicketsSold: stats.totalSold,
       checkInCount: stats.checkInCount,
 
       /**
-       * MONEY
+       * AUDITED MONEY BUCKETS
        */
-      grossRevenue,
-
+      grossRevenue, // Online income route pool (Clean & uninflated)
+      grossGateRevenue, // Documented venue-front gate sales capital
       platformFeePercent: SKAUTE_FEE_PERCENT,
-
-      platformFeeAmount,
-
-      organizerNetRevenue,
+      platformFeeAmount: totalPlatformFeeAmount, // Combined commissions (Online + Gate)
+      organizerNetRevenue: organizerTotalNetRevenue,
 
       /**
-       * PAYOUTS
+       * WALLET SETTLEMENT CONTROL
        */
       totalPayoutRequested: payoutStats.totalPayoutRequested,
-
       totalPayoutCompleted: payoutStats.totalPayoutCompleted,
-
       totalPendingPayouts: payoutStats.totalPendingPayouts,
-
-      withdrawableBalance,
+      withdrawableBalance, // Accurately reduced by offline gate debts automatically
 
       /**
-       * BREAKDOWN
+       * BREAKDOWN BY CATEGORY
        */
       salesByTier,
     },
@@ -1322,4 +1326,179 @@ export const deleteEvent = async (eventId: string, userId: string) => {
 
   logger.info(`Event Hard Deleted: ID=${eventId} by Host=${userId}`);
   return true;
+};
+
+interface ManualTicketInput {
+  eventId: string;
+  operatorId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  tierId: string;
+  paymentMethod: "cash" | "transfer" | "pos" | "complimentary";
+}
+
+export const issueManualComplimentaryTicket = async (
+  input: ManualTicketInput,
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // 1. Fetch event asset metadata securely within this session instance
+    const event = await Event.findById(input.eventId).session(session);
+    if (!event) {
+      throw new AppError(httpStatus.NOT_FOUND, "Skaute event asset not found.");
+    }
+
+    // 2. Authorization Check (Organizer or Authorized Partners Only)
+    const isOrganizer = event.organizer.toString() === input.operatorId;
+    const partnerRecord = event.coOrganizers?.find((coOrg: any) => {
+      const coOrgId = coOrg.user?._id || coOrg.user?.id || coOrg.user;
+      return coOrgId.toString() === input.operatorId;
+    });
+
+    const isAuthorized =
+      isOrganizer || partnerRecord?.permissions?.includes("issue_refunds");
+    if (!isAuthorized) {
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        "You do not have management permissions to manually issue passes.",
+      );
+    }
+
+    // 3. Resolve internal database subdocument tier configurations
+    const targetTier = event.ticketTiers.find(
+      (t: any) =>
+        t._id?.toString() === input.tierId || t.id?.toString() === input.tierId,
+    );
+
+    if (!targetTier) {
+      throw new AppError(
+        httpStatus.NOT_FOUND,
+        "Target ticket tier profile missing.",
+      );
+    }
+
+    // 4. Fire Atomic Inventory Locks (Prevents race conditions / overselling)
+    const ticketPrice = await lockInventory(
+      input.eventId,
+      targetTier.name,
+      1,
+      session,
+    );
+
+    // 5. Financial Math Core (Determine values based on incoming context)
+    const isComplimentary = input.paymentMethod === "complimentary";
+    const totalAmount = isComplimentary ? 0 : ticketPrice;
+
+    // Calculate your 5.5% platform commission fee if it's a paid gate sale
+    const platformFee = isComplimentary ? 0 : Math.round(totalAmount * 0.055);
+
+    // 💡 THE DEBT MAGIC: Since the host holds the physical gross cash,
+    // we record your fee as a negative value against their digital account balance
+    const netAmount = isComplimentary ? 0 : -platformFee;
+
+    // 6. Generate secure check-in validation tracking strings
+    const checkInCode = `SKT-MAN-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+    const ticketCode = `REF-MAN-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    // 7. Satisfy Schema: Build an Administrative Order Document
+    const [adminOrder] = await Order.create(
+      [
+        {
+          buyerEmail: input.email,
+          event: event._id,
+          tierName: targetTier.name,
+          quantity: 1,
+          totalAmount, // Records true ticket cost or 0 if free
+          status: ORDER_STATUS.COMPLETED,
+          paymentReference: ticketCode,
+          paymentUrl: `offline-${input.paymentMethod}`,
+          expiresAt: new Date(),
+          paymentMethod: input.paymentMethod, //
+          issuedBy: new mongoose.Types.ObjectId(input.operatorId),
+        },
+      ],
+      { session },
+    );
+
+    // 8. Create the Ticket linking it straight to the new adminOrder
+    const [newTicket] = await Ticket.create(
+      [
+        {
+          event: event._id,
+          owner: undefined,
+          order: adminOrder._id,
+          tierName: targetTier.name,
+          pricePaid: totalAmount, // Stores exactly what they paid offline
+          buyerInfo: {
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email: input.email,
+          },
+          ticketCode,
+          checkInCode,
+          status: "valid",
+        },
+      ],
+      { session },
+    );
+
+    // 9. 🆕 Create Ledger Entry for Financial Auditing
+    // This logs the debt safely inside your transactions collection
+    await Transaction.create(
+      [
+        {
+          user: event.organizer, // The host who now owes Skaute the commission fee
+          event: event._id,
+          type: "gate_sale", // Tagged to prevent standard online payout confusion
+          amount: totalAmount, // Gross money collected offline by the host
+          fee: platformFee, // Skaute commission earnings
+          netAmount: netAmount, // Negative debt profile hook
+          status: "success",
+          reference: `TXN-${ticketCode}`,
+          metadata: {
+            isOfflineGateSale: true,
+            issuedBy: input.operatorId,
+            tierName: targetTier.name,
+          },
+        },
+      ],
+      { session },
+    );
+
+    // Everything matches constraints—commit transaction safely
+    await session.commitTransaction();
+
+    // 10. Fire Asynchronous Notification Side-Effects
+    try {
+      skauteEvents.emit("order.fulfilled", {
+        order: adminOrder,
+        tickets: [newTicket],
+        eventImage: event.image,
+        isManualPlacement: true,
+      });
+    } catch (emitterErr) {
+      logger.error(
+        `Manual placement notification broadcast error context: ${emitterErr}`,
+      );
+    }
+
+    return {
+      ticketId: newTicket._id,
+      ticketCode: newTicket.ticketCode,
+      checkInCode: newTicket.checkInCode,
+      orderId: adminOrder._id,
+      feeOwed: platformFee,
+    };
+  } catch (error: any) {
+    if (session.inTransaction()) await session.abortTransaction();
+    logger.error(
+      `Manual Ticket Issuance Aborted: ${error.message} - Operator: ${input.operatorId}`,
+    );
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 };

@@ -205,6 +205,48 @@ export const getManagementDashboardData = async (
     next(error);
   }
 };
+
+export const issueManualTicket = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const eventId = req.params.id as string;
+
+    const { firstName, lastName, email, tierId, paymentMethod } = req.body;
+
+    // Extract the executing user injected by your 'protect' middleware
+    const user = (req as any).user;
+    const operatorId = user._id.toString();
+
+    // Hand execution payload details off to your application service layer
+    const result = await eventService.issueManualComplimentaryTicket({
+      eventId,
+      operatorId,
+      firstName,
+      lastName,
+      email: email.toLowerCase().trim(),
+      tierId,
+      paymentMethod,
+    });
+
+    // 🆕 Make the response message dynamic for clear UI feedback toasts
+    const feedbackMessage =
+      paymentMethod === "complimentary"
+        ? "Complimentary access pass generated successfully."
+        : `Gate ticket registered successfully via ${paymentMethod.toUpperCase()}.`;
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      message: feedbackMessage,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const addCoOrganizer = async (
   req: Request,
   res: Response,

@@ -268,6 +268,36 @@ export const updateCoOrganizerPermissionsValidation = z.object({
   }),
 });
 
+export const issueManualTicketValidation = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid Event ID format"),
+  }),
+  body: z.object({
+    firstName: z
+      .string()
+      .min(1, "First name is required")
+      .max(40, "Name is too long")
+      .trim(),
+    lastName: z
+      .string()
+      .min(1, "Last name is required")
+      .max(40, "Name is too long")
+      .trim(),
+    email: z
+      .string()
+      .email("Please provide a valid attendee email address")
+      .lowercase()
+      .trim(),
+    tierId: z
+      .string()
+      .regex(/^[0-9a-fA-F]{24}$/, "Invalid ticket tier configuration ID"),
+    // 🆕 Added validation for the offline payment channel chosen at the gate
+    paymentMethod: z
+      .enum(["cash", "transfer", "pos", "complimentary"])
+      .default("cash"),
+  }),
+});
+
 export type CreateEventInput = z.infer<typeof createEventSchema>["body"];
 export type EventIdParam = z.infer<typeof eventIdParamSchema>["params"];
 export type AddCoOrganizerInput = z.infer<typeof addCoOrganizerSchema>;
@@ -275,3 +305,6 @@ export type RemoveCoOrganizerInput = z.infer<typeof removeCoOrganizerSchema>;
 export type CreateDiscountInput = z.infer<typeof createDiscountValidation>;
 export type ValidateDiscountInput = z.infer<typeof validateDiscountValidation>;
 export type DeleteDiscountInput = z.infer<typeof deleteDiscountValidation>;
+export type IssueManualTicketInput = z.infer<
+  typeof issueManualTicketValidation
+>;
