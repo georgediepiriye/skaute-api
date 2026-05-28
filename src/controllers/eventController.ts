@@ -462,3 +462,48 @@ export const getGateControlTelemetry = async (
     next(error);
   }
 };
+
+export const cancelEvent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const user = (req as any).user as IUser;
+
+    const cancelledEvent = await eventService.cancelEvent(
+      id as string,
+      user._id.toString(),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Event has been cancelled successfully. Attendees notified.",
+      data: { event: cancelledEvent },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteEvent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { id } = req.params;
+    const user = (req as any).user as IUser;
+
+    await eventService.deleteEvent(id as string, user._id.toString());
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Event removed cleanly from system logs.",
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

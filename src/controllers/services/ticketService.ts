@@ -467,6 +467,7 @@ export const getTicketById = async (ticketId: string) => {
     select: "title startDate location image",
   });
 
+  console.log(ticket, "Fetched Ticket Details"); // Debug log to verify ticket retrieval
   if (!ticket) {
     throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
   }

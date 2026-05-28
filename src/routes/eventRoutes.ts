@@ -81,6 +81,16 @@ router.delete(
 router.patch("/:id/toggle-sold-out", eventController.toggleSoldOutStatus);
 router.get("/:eventId/gate-control", eventController.getGateControlTelemetry);
 
-// router.delete("/:id", eventController.deleteEvent);
+router.patch(
+  "/:id/cancel",
+  validate(eventIdParamSchema),
+  eventController.cancelEvent,
+);
+
+router.delete(
+  "/:id",
+  validate(eventIdParamSchema),
+  eventController.deleteEvent,
+);
 
 export default router;

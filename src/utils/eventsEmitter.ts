@@ -4,6 +4,8 @@ import {
   sendTicketEmail,
   sendRefundEmail,
   sendWelcomeEmail,
+  sendEventModerationEmail,
+  sendCancellationEmail,
 } from "./emailService.js"; // Assume sendRefundEmail exists
 
 // Initialize the EventEmitter
@@ -77,6 +79,71 @@ const handleTicketRefunded = async ({
   }
 };
 
+const handleEventModerated = async ({
+  organizer,
+  event,
+  status,
+  reason,
+}: {
+  organizer: any;
+  event: any;
+  status: "approved" | "rejected";
+  reason?: string;
+}) => {
+  try {
+    logger.info(`Background: Sending moderation email for Event ${event._id}`);
+
+    await sendEventModerationEmail({
+      to: organizer.email,
+      organizerName: organizer.name || "Skauter",
+      eventTitle: event.title,
+      status,
+      reason,
+    });
+
+    logger.info(`Background: Moderation email sent to ${organizer.email}`);
+  } catch (error: any) {
+    logger.error(`Background Error: Moderation email failed: ${error.message}`);
+  }
+};
+
+/**
+ * Handle Broadcasted Event Cancellation to Ticket Holders
+ */
+const handleEventCancelled = async ({
+  event,
+  tickets,
+}: {
+  event: any;
+  tickets: any[];
+}) => {
+  try {
+    logger.info(
+      `Background: Dispatching cancellation alerts for Event ${event._id} to ${tickets.length} ticket holders.`,
+    );
+
+    // Iterate through ticket holder manifest and fire async email pipelines
+    const deliveryPromises = tickets.map((ticket) => {
+      const buyerEmail = ticket.buyerInfo?.email || ticket.user?.email;
+      const buyerName = ticket.buyerInfo?.firstName || "Skauter";
+
+      if (buyerEmail) {
+        return sendCancellationEmail(buyerEmail, buyerName, event.title);
+      }
+      return Promise.resolve();
+    });
+
+    await Promise.all(deliveryPromises);
+    logger.info(
+      `Background: Completed all cancellation mail drops for Event ${event._id}`,
+    );
+  } catch (error: any) {
+    logger.error(
+      `Background Error: Failed to drop cancellation alert batch: ${error.message}`,
+    );
+  }
+};
+
 /**
  * PREVENT MEMORY LEAKS
  * removeAllListeners ensures we don't duplicate listeners during hot-reloads
@@ -84,12 +151,14 @@ const handleTicketRefunded = async ({
 skauteEvents.removeAllListeners("order.fulfilled");
 skauteEvents.removeAllListeners("ticket.refunded");
 skauteEvents.removeAllListeners("user.signup");
-
+skauteEvents.removeAllListeners("event.moderated");
+skauteEvents.removeAllListeners("event.cancelled");
 // Register the listeners
 skauteEvents.on("order.fulfilled", handleOrderFulfilled);
 skauteEvents.on("ticket.refunded", handleTicketRefunded);
 skauteEvents.on("user.signup", handleUserSignup);
-
+skauteEvents.on("event.moderated", handleEventModerated);
+skauteEvents.on("event.cancelled", handleEventCancelled);
 skauteEvents.setMaxListeners(20);
 
 export default skauteEvents;

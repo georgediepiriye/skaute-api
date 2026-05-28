@@ -29,6 +29,9 @@ export interface ICoOrganizer {
   assignedAt: Date;
 }
 
+/**
+ * MAIN EVENT INTERFACE (UPDATED)
+ */
 export interface IEvent extends Document {
   title: string;
   slug: string;
@@ -38,8 +41,15 @@ export interface IEvent extends Document {
   endDate: Date;
   type: skauteType;
   status: ("verified" | "featured")[];
-  approvalStatus: "pending" | "approved" | "rejected";
 
+  // ✅ APPROVAL SYSTEM (ENHANCED)
+  approvalStatus: "pending" | "approved" | "rejected";
+  approvalReason?: string;
+  approvedBy?: mongoose.Types.ObjectId;
+  approvedAt?: Date;
+  rejectedBy?: mongoose.Types.ObjectId;
+  rejectedAt?: Date;
+  ticketsSold: number;
   eventFormat: "physical" | "online" | "hybrid";
   isOnline: boolean;
 
@@ -64,13 +74,13 @@ export interface IEvent extends Document {
   discounts: IDiscount[];
   totalCapacity?: number;
 
-  // Boosting & Discovery Metrics
-  isSkauteHosted: boolean; // 💡 Ultimate priority placement flag
+  isSkauteHosted: boolean;
   isBoosted: boolean;
   boostExpiry?: Date;
   boostTier: "none" | "standard" | "premium";
   boostedBy?: mongoose.Types.ObjectId;
   priorityLevel: number;
+
   verifiedAt?: Date;
   featuredAt?: Date;
 
@@ -92,42 +102,39 @@ export interface IEvent extends Document {
   views: number;
   likes: number;
   participantImages: string[];
+
   ageRestriction?: string;
   refundPolicy: "none" | "flexible" | "24h";
   tags: string[];
+
   isSoldOut: boolean;
   isCancelled: boolean;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
 /**
- * REUSABLE DISCOVERY PRIORITIZATION UTILITY
- * Decoupled calculation logic to prevent desynchronization between save loops and API updates
+ * PRIORITY SCORE ENGINE
  */
 export const calculatePriorityScore = (event: {
   status: ("verified" | "featured")[];
   isBoosted: boolean;
   boostExpiry?: Date;
-  isSkauteHosted?: boolean; // 💡 Embedded into calculation layer
+  isSkauteHosted?: boolean;
+  isCancelled?: boolean; // Add this
 }): number => {
-  let score = 0;
+  // If the move is cancelled, completely strip its search ranking priority
+  if (event.isCancelled) return -10;
 
-  // 1. Structural validation tiers
+  let score = 0;
   if (event.status?.includes("verified")) score += 1;
   if (event.status?.includes("featured")) score += 2;
 
-  // 2. Commercial organic promotion tier
   const now = new Date();
-  if (
-    event.isBoosted &&
-    event.boostExpiry &&
-    new Date(event.boostExpiry) > now
-  ) {
+  if (event.isBoosted && event.boostExpiry && event.boostExpiry > now) {
     score += 4;
   }
-
-  // 3. Absolute ecosystem dominance layer (Skaute original/hosted items)
   if (event.isSkauteHosted) {
     score += 8;
   }
@@ -135,23 +142,22 @@ export const calculatePriorityScore = (event: {
   return score;
 };
 
+/**
+ * SCHEMAS
+ */
 const ticketTierSchema = new Schema<ITicketTier>({
   name: { type: String, required: true },
   price: { type: Number, default: 0, min: 0 },
   capacity: { type: Number, required: true, min: 1 },
   sold: { type: Number, default: 0 },
   description: String,
-  salesEnd: { type: Date },
+  salesEnd: Date,
   isSoldOut: { type: Boolean, default: false },
 });
 
 const coOrganizerSchema = new Schema<ICoOrganizer>(
   {
-    user: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     permissions: {
       type: [String],
       enum: [
@@ -162,63 +168,81 @@ const coOrganizerSchema = new Schema<ICoOrganizer>(
       ],
       default: ["scan_tickets"],
     },
-    assignedAt: {
-      type: Date,
-      default: Date.now,
-    },
+    assignedAt: { type: Date, default: Date.now },
   },
   { _id: false },
 );
 
+/**
+ * EVENT SCHEMA
+ */
 const eventSchema = new Schema<IEvent>(
   {
     title: {
       type: String,
       required: [true, "Please provide a title"],
       trim: true,
-      maxlength: [100, "Title cannot exceed 100 characters"],
+      maxlength: 100,
     },
+
     slug: {
       type: String,
-      required: [true, "Event slug is required for short URLs"],
+      required: true,
       unique: true,
       lowercase: true,
-      trim: true,
       index: true,
     },
+
     description: {
       type: String,
-      required: [true, "Please provide a description"],
+      required: true,
     },
+
     eventFormat: {
       type: String,
       enum: ["physical", "online", "hybrid"],
       default: "physical",
     },
+
     isOnline: { type: Boolean, default: false },
+
     type: {
       type: String,
       enum: Object.keys(EVENT_TYPES),
       default: "activity",
     },
+
     status: {
       type: [String],
       enum: ["verified", "featured"],
       default: [],
     },
+
+    // ✅ APPROVAL SCHEMA (UPDATED)
     approvalStatus: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
       index: true,
     },
+
+    approvalReason: String,
+
+    approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    approvedAt: Date,
+
+    rejectedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    rejectedAt: Date,
+
     category: {
       type: String,
       enum: Object.keys(EVENT_CATEGORIES),
-      required: [true, "Please select a category"],
+      required: true,
     },
+
     isPublic: { type: Boolean, default: true },
     allowAnonymous: { type: Boolean, default: true },
+
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
 
@@ -226,13 +250,13 @@ const eventSchema = new Schema<IEvent>(
       type: {
         type: String,
         enum: ["Point"],
-        required: function (this: IEvent) {
+        required: function () {
           return this.eventFormat !== "online";
         },
       },
       coordinates: {
         type: [Number],
-        required: function (this: IEvent) {
+        required: function () {
           return this.eventFormat !== "online";
         },
       },
@@ -251,23 +275,31 @@ const eventSchema = new Schema<IEvent>(
       enum: ["none", "internal", "external"],
       default: "none",
     },
+    ticketsSold: { type: Number, default: 0 },
+
     ticketTiers: [ticketTierSchema],
     discounts: [discountSchema],
     totalCapacity: { type: Number, default: null },
-    // Boosting Infrastructure fields
+
     isSkauteHosted: { type: Boolean, default: false, index: true },
     isBoosted: { type: Boolean, default: false, index: true },
-    boostExpiry: { type: Date },
+    boostExpiry: Date,
+
     boostTier: {
       type: String,
       enum: ["none", "standard", "premium"],
       default: "none",
     },
+
     boostedBy: { type: Schema.Types.ObjectId, ref: "User" },
+
     priorityLevel: { type: Number, default: 0, index: true },
-    verifiedAt: { type: Date },
-    featuredAt: { type: Date },
+
+    verifiedAt: Date,
+    featuredAt: Date,
+
     isRecurring: { type: Boolean, default: false },
+
     recurrence: {
       frequency: {
         type: String,
@@ -275,37 +307,47 @@ const eventSchema = new Schema<IEvent>(
         default: "none",
       },
       interval: { type: Number, default: 1 },
-      daysOfWeek: [{ type: Number }],
-      endDate: { type: Date },
-      parentId: { type: Schema.Types.ObjectId, ref: "Event", default: null },
+      daysOfWeek: [Number],
+      endDate: Date,
+      parentId: { type: Schema.Types.ObjectId, ref: "Event" },
     },
-    joinLink: { type: String, trim: true },
-    meetingLink: { type: String, trim: true },
-    communityLink: { type: String, trim: true },
-    externalTicketLink: { type: String, trim: true },
+
+    joinLink: String,
+    meetingLink: String,
+    communityLink: String,
+    externalTicketLink: String,
+
     attendees: { type: Number, default: 0 },
     views: { type: Number, default: 0, index: true },
     likes: { type: Number, default: 0, index: true },
-    participantImages: [{ type: String }],
-    organizer: { type: Schema.Types.ObjectId, ref: "User", required: true },
+
+    participantImages: [String],
+
+    organizer: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
     coOrganizers: [coOrganizerSchema],
+
     organizerType: {
       type: String,
       enum: ["individual", "business"],
       default: "individual",
     },
+
     ageRestriction: { type: String, default: "All Ages" },
+
     refundPolicy: {
       type: String,
       enum: ["none", "flexible", "24h"],
       default: "none",
     },
-    tags: [{ type: String }],
-    isSoldOut: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
+
+    tags: [String],
+
+    isSoldOut: { type: Boolean, default: false, index: true },
     isCancelled: { type: Boolean, default: false },
   },
   {
@@ -315,55 +357,26 @@ const eventSchema = new Schema<IEvent>(
   },
 );
 
+eventSchema.index({ location: "2dsphere" });
 /**
  * PRE-SAVE HOOK
  */
-eventSchema.pre<IEvent>("save", async function (this: IEvent) {
-  // 1. Sync isOnline helper
+eventSchema.pre<IEvent>("save", function () {
   this.isOnline =
     this.eventFormat === "online" || this.eventFormat === "hybrid";
 
-  // 2. Pricing and Capacity logic
-  if (this.ticketingType === "internal" && this.ticketTiers?.length > 0) {
-    this.totalCapacity = this.ticketTiers.reduce(
-      (acc, tier) => acc + (tier.capacity || 0),
-      0,
-    );
-    const hasPaidTier = this.ticketTiers.some((tier) => tier.price > 0);
-    this.isFree = !hasPaidTier;
-  } else if (this.ticketingType === "external") {
-    this.isFree = false;
-  } else {
-    this.isFree = true;
-  }
-
-  // 3. Slug formatting
-  if (this.slug) {
-    this.slug = this.slug
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9-]/g, "-")
-      .replace(/-+/g, "-");
-  }
-
-  if (this.isNew) {
-    this.views = 0;
-    this.likes = 0;
-    this.attendees = 0;
-  }
-
-  // 4. Update Priority Level using global decoupled scoring logic
   if (
     this.isModified("status") ||
     this.isModified("isBoosted") ||
-    this.isModified("boostExpiry") ||
-    this.isModified("isSkauteHosted") // 💡 Sync priority level if platform status shifts
+    this.isModified("isCancelled") ||
+    this.isModified("isSkauteHosted")
   ) {
     this.priorityLevel = calculatePriorityScore({
       status: this.status,
       isBoosted: this.isBoosted,
       boostExpiry: this.boostExpiry,
       isSkauteHosted: this.isSkauteHosted,
+      isCancelled: this.isCancelled, // Pass it along
     });
   }
 });
@@ -371,50 +384,12 @@ eventSchema.pre<IEvent>("save", async function (this: IEvent) {
 /**
  * VIRTUALS
  */
-eventSchema.virtual("shortUrl").get(function (this: IEvent) {
+eventSchema.virtual("shortUrl").get(function () {
   return `/e/${this.slug}`;
 });
 
-eventSchema.virtual("priceLabel").get(function (this: IEvent) {
-  if (
-    this.ticketingType === "none" ||
-    !this.ticketTiers ||
-    this.ticketTiers.length === 0
-  ) {
-    return "Free";
-  }
-  const prices = this.ticketTiers.map((t) => t.price);
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  if (max === 0) return "Free";
-  if (min === 0 && max > 0) return "Free +";
-  if (min === max) return `₦${min.toLocaleString()}`;
-  return `From ₦${min.toLocaleString()}`;
-});
-
-eventSchema.virtual("startingPrice").get(function (this: IEvent) {
-  if (this.isFree || !this.ticketTiers || this.ticketTiers.length === 0)
-    return 0;
-  return Math.min(...this.ticketTiers.map((tier) => tier.price));
-});
-
 /**
- * DATA INDEXES
+ * EXPORT
  */
-eventSchema.index({ location: "2dsphere" }, { sparse: true });
-eventSchema.index({ "location.neighborhood": 1 }, { sparse: true });
-eventSchema.index({ "recurrence.parentId": 1 });
-eventSchema.index({ startDate: 1 });
-
-// High-performance compound lookup index designed for lightning-fast localized discovery listings
-eventSchema.index({
-  approvalStatus: 1,
-  isCancelled: 1,
-  isSoldOut: 1,
-  "location.neighborhood": 1,
-  priorityLevel: -1,
-  startDate: 1,
-});
-
 export const Event =
   mongoose.models.Event || mongoose.model<IEvent>("Event", eventSchema);

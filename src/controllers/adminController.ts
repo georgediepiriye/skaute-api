@@ -58,17 +58,26 @@ export const getEventPreview = async (
     next(error);
   }
 };
-
 export const processApproval = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const { status } = req.body;
+    const {
+      status,
+      reason,
+    }: {
+      status: "approved" | "rejected";
+      reason?: string;
+    } = req.body;
+
+    const adminId = (req.user as any)?.id?.toString();
     const event = await adminService.updateApprovalStatus(
       req.params.id as string,
       status,
+      adminId,
+      reason,
     );
 
     if (!event) {
@@ -247,14 +256,6 @@ export const completeManualPayout = async (
   try {
     const { id } = req.params;
     const { reference } = req.body; // Expects the manual banking receipt reference string
-
-    if (!reference) {
-      return res.status(httpStatus.BAD_REQUEST).json({
-        status: "error",
-        message:
-          "A payment reference string is strictly required to resolve a manual settlement trace.",
-      });
-    }
 
     const completedPayout = await adminService.processManualPayoutCompletion(
       id as string,

@@ -9,6 +9,7 @@ import { CreateDiscountInput } from "../../validation/eventValidation.js";
 import { ScanLog } from "../../models/ScanLog.js";
 import { Payout } from "../../models/Payout.js";
 import config from "../../config/config.js";
+import skauteEvents from "../../utils/eventsEmitter.js";
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -1224,4 +1225,101 @@ export const getGateControlTelemetryData = async (
     fraudAlerts: fraudAlerts.slice(0, 10),
     liveFeed: liveFeed.slice(0, 25),
   };
+};
+
+export const cancelEvent = async (eventId: string, userId: string) => {
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event record not found");
+  }
+
+  const isOrganizer = event.organizer.toString() === userId;
+  const isCoOrganizer = event.coOrganizers?.some(
+    (id: any) => id.toString() === userId,
+  );
+  if (!isOrganizer && !isCoOrganizer) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Unauthorized action on this event",
+    );
+  }
+
+  event.isCancelled = true;
+  event.status = "cancelled";
+  await event.save();
+
+  logger.warn(
+    `Event Cancelled: ID=${eventId} by User=${userId}. Ticket sales hold state: ${event.ticketsSold || 0}`,
+  );
+
+  // Cascade to future instances if it's a parent recurring template move
+  if (event.isRecurring && !event.recurrence?.parentId) {
+    await Event.updateMany(
+      {
+        "recurrence.parentId": event._id,
+        startDate: { $gt: new Date() },
+      },
+      { $set: { isCancelled: true, status: "cancelled" } },
+    );
+    logger.info(
+      `Cascaded cancellation status to future instances of ParentID=${event._id}`,
+    );
+  }
+
+  // Fetch all active ticket holders for this event to alert them
+  try {
+    const activeTickets = await Ticket.find({
+      event: event._id,
+      status: { $ne: "refunded" },
+    });
+
+    if (activeTickets.length > 0) {
+      skauteEvents.emit("event.cancelled", { event, tickets: activeTickets });
+    }
+  } catch (err: any) {
+    logger.error(
+      `Non-blocking controller failure locating ticket holder references: ${err.message}`,
+    );
+  }
+
+  return event;
+};
+
+export const deleteEvent = async (eventId: string, userId: string) => {
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event record not found");
+  }
+
+  if (event.organizer.toString() !== userId) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Only the primary host can permanently purge an event",
+    );
+  }
+
+  // Integrity Check: Has anyone spent money or locked down a ticket tag?
+  const totalTicketsSold = event.ticketsSold || 0;
+  if (totalTicketsSold > 0) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "This move cannot be deleted because tickets are already checked out. Use the cancel endpoint instead to preserve accounting logs.",
+    );
+  }
+
+  // Safe to remove completely since ticketsSold is 0
+  await Event.findByIdAndDelete(eventId);
+
+  // Clean up children variants if it was a parent setup
+  if (event.isRecurring && !event.recurrence?.parentId) {
+    await Event.deleteMany({ "recurrence.parentId": event._id });
+    logger.info(
+      `Purged all un-purchased child instances of ParentID=${event._id}`,
+    );
+  }
+
+  logger.info(`Event Hard Deleted: ID=${eventId} by Host=${userId}`);
+  return true;
 };

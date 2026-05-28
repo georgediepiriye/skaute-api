@@ -11,6 +11,7 @@ import { ScanLog } from "../../models/ScanLog.js";
 import { Ticket } from "../../models/Ticket.js";
 import { Transaction } from "../../models/Transaction.js";
 import { User } from "../../models/User.js";
+import skauteEvents from "../../utils/eventsEmitter.js";
 
 export const getModerationQueue = async (query: any) => {
   // 1. FILTERING
@@ -77,20 +78,53 @@ export const getEventForPreview = async (id: string) => {
   return event;
 };
 
-export const updateApprovalStatus = async (id: string, status: string) => {
-  const updateData: any = { approvalStatus: status };
+export const updateApprovalStatus = async (
+  id: string,
+  status: "approved" | "rejected",
+  adminId: string,
+  reason?: string,
+) => {
+  const event = await Event.findById(id).populate("organizer");
+
+  if (!event) {
+    throw new Error("Event not found");
+  }
+
+  const updateData: any = {
+    approvalStatus: status,
+    approvedBy: adminId,
+  };
 
   if (status === "approved") {
     updateData.isActive = true;
-    updateData.publishedAt = Date.now();
+    updateData.publishedAt = new Date();
+    updateData.approvedAt = new Date();
+
+    updateData.rejectionReason = "";
+    updateData.rejectedAt = null;
   }
 
-  const event = await Event.findByIdAndUpdate(id, updateData, {
+  if (status === "rejected") {
+    updateData.isActive = false;
+
+    updateData.rejectionReason = reason || "";
+    updateData.rejectedAt = new Date();
+  }
+
+  const updatedEvent = await Event.findByIdAndUpdate(id, updateData, {
     new: true,
     runValidators: true,
   });
 
-  return event;
+  // ASYNC BACKGROUND EMAIL
+  skauteEvents.emit("event.moderated", {
+    organizer: event.organizer,
+    event,
+    status,
+    reason,
+  });
+
+  return updatedEvent;
 };
 
 export const getUsersList = async (query: any) => {
