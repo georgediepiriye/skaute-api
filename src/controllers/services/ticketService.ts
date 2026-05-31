@@ -116,7 +116,13 @@ const createTicketsForOrder = async (
     });
   }
 
-  const tickets = await Ticket.create(ticketsToCreate, { session });
+  // 1. Insert documents directly into MongoDB via the transaction session
+  const tickets = await Ticket.insertMany(ticketsToCreate, { session });
+
+  // 2. FIXED: Populate using a clean type-safe layout that supports transactional sessions safely
+  await Ticket.populate(tickets, [{ path: "event", options: { session } }]);
+
+  // 3. Find event fallback details
   const eventData = await Event.findById(order.event).session(session);
 
   return {

@@ -12,6 +12,7 @@ import { Ticket } from "../../models/Ticket.js";
 import { Transaction } from "../../models/Transaction.js";
 import { User } from "../../models/User.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
+import config from "../../config/config.js";
 
 export const getModerationQueue = async (query: any) => {
   // 1. FILTERING
@@ -244,8 +245,8 @@ export const getPulseMetrics = async () => {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  // Skaute Platform Business Core Mechanics: 10% Platform Commission
-  const PLATFORM_COMMISSION_RATE = 0.1;
+  // Skaute Platform Business Core Mechanics: 5.5% Platform Commission
+  const SKAUTE_FEE_PERCENT = Number(config.skauteFeePercent) || 5.5;
 
   const [
     neighborhoodHeat,
@@ -326,7 +327,7 @@ export const getPulseMetrics = async () => {
     financialOverview.find((f) => f._id === ORDER_STATUS.COMPLETED)?.total || 0;
 
   // Platform Split Engine Mechanics
-  const platformEarnings = grossCompletedRevenue * PLATFORM_COMMISSION_RATE;
+  const platformEarnings = grossCompletedRevenue * (SKAUTE_FEE_PERCENT / 100);
   const clearOrganizerEscrowPool = grossCompletedRevenue - platformEarnings;
 
   // Safe Check-In Parsing
@@ -377,29 +378,74 @@ export const getEventManagementDetails = async (eventId: string) => {
     // 1. Fetch core event and host details
     Event.findById(eventId).populate("organizer", "name email image"),
 
-    // 2. Fetch successful transactions only
+    // 2. Fetch successful transactions only (Online Pipe)
     Order.find({
       event: eventId,
-      status: ORDER_STATUS.COMPLETED, // Aligned with your provided constant
+      status: ORDER_STATUS.COMPLETED,
     })
       .sort("-createdAt")
       .populate("user", "name email"),
 
-    // 3. Fetch all issued tickets for engagement tracking
+    // 3. Fetch all issued tickets (Includes physical door entries)
     Ticket.find({ event: eventId }).sort("-createdAt"),
   ]);
 
   if (!event) return null;
 
-  // 4. Calculate Operational Analytics
-  const totalRevenue = orders.reduce(
+  // --- COMPREHENSIVE FINANCIAL SPLIT RECONCILIATION ENGINE ---
+  const platformFeePercent = event.platformFeePercent ?? 5.5;
+
+  // 1. Online Channel Metrics
+  const onlineGrossRevenue = orders.reduce(
     (sum, order) => sum + order.totalAmount,
+    0,
+  );
+  const onlineSkauteFee = (onlineGrossRevenue * platformFeePercent) / 100;
+  const onlineOrganizerNet = onlineGrossRevenue - onlineSkauteFee;
+
+  // 2. Physical Gate Channel Metrics (Accurately targeted based on your Mongoose doc structure)
+  const physicalTickets = tickets.filter((t) => {
+    const hasGateFlags = t.purchaseChannel === "gate" || t.isManualFormItem;
+    const isGateCode =
+      t.buyerInfo?.ticketCode?.startsWith("REF-MAN-") ||
+      t.checkInCode?.startsWith("SKT-MAN-");
+
+    return hasGateFlags || isGateCode;
+  });
+
+  const physicalGrossRevenue = physicalTickets.reduce(
+    (sum, ticket) => sum + Number(ticket.pricePaid || 0),
+    0,
+  );
+  const physicalSkauteFeeDebt =
+    (physicalGrossRevenue * platformFeePercent) / 100;
+  const physicalOrganizerCollectedCash =
+    physicalGrossRevenue - physicalSkauteFeeDebt;
+
+  // --- QUANTITY COUNT METRICS ---
+  const doorTicketsCount = physicalTickets.length;
+  const onlineTicketsCount = Math.max(tickets.length - doorTicketsCount, 0);
+
+  // 3. Overall Totals
+  const combinedGrossRevenue = onlineGrossRevenue + physicalGrossRevenue;
+  const totalSkauteCommissions = onlineSkauteFee + physicalSkauteFeeDebt;
+  const organizerLifetimeNetWorth =
+    onlineOrganizerNet + physicalOrganizerCollectedCash;
+
+  // 4. Liquid Escrow Vault Clearance (The exact pool eligible for manual admin withdrawal approvals)
+  const totalPayoutCompleted = event.totalPayoutCompleted ?? 0;
+  const totalPayoutProcessing = event.totalPayoutProcessing ?? 0;
+  const withdrawableBalance = Math.max(
+    onlineOrganizerNet -
+      physicalSkauteFeeDebt -
+      totalPayoutCompleted -
+      totalPayoutProcessing,
     0,
   );
 
   // Identify check-ins based on your Ticket schema status
   const checkedInCount = tickets.filter(
-    (t) => t.status === TICKET_STATUS.used,
+    (t) => t.status === TICKET_STATUS.used || t.status === "used",
   ).length;
 
   return {
@@ -407,8 +453,10 @@ export const getEventManagementDetails = async (eventId: string) => {
     orders,
     tickets,
     analytics: {
-      totalRevenue,
+      totalRevenue: combinedGrossRevenue,
       totalTicketsSold: tickets.length,
+      onlineTicketsCount, // 🔥 Added: Total tickets bought via the app/web
+      doorTicketsCount, // 🔥 Added: Total tickets issued at the physical venue gate
       checkInCount: checkedInCount,
       checkInRate:
         tickets.length > 0
@@ -417,6 +465,33 @@ export const getEventManagementDetails = async (eventId: string) => {
       capacityUtilization: event.totalCapacity
         ? Math.round((tickets.length / event.totalCapacity) * 100)
         : 100,
+    },
+    financials: {
+      config: { platformFeePercent },
+      overallTotals: {
+        combinedGrossRevenue,
+        totalSkauteCommissions,
+        organizerLifetimeNetWorth,
+      },
+      onlineSalesChannel: {
+        grossRevenue: onlineGrossRevenue,
+        skauteCommissions: onlineSkauteFee,
+        cleanNetPool: onlineOrganizerNet,
+      },
+      physicalGateChannel: {
+        grossRevenue: physicalGrossRevenue,
+        skauteCommissionsDebt: physicalSkauteFeeDebt,
+        organizerCollectedCash: physicalOrganizerCollectedCash,
+      },
+      skauteVaultLedger: {
+        initialHeldCash: onlineOrganizerNet,
+        deductions: {
+          gateCommissionsClawback: physicalSkauteFeeDebt,
+          payoutsTransferred: totalPayoutCompleted,
+          payoutsLockedInTransit: totalPayoutProcessing,
+        },
+        finalWithdrawableBalance: withdrawableBalance,
+      },
     },
   };
 };

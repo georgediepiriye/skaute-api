@@ -461,12 +461,10 @@ export const getManagementDashboardData = async (
    * 2. SECURITY & AUTHORIZATION CHECK
    */
   const isOwner = event.organizer.toString() === userId;
-
   const isCoOrg = event.coOrganizers?.some((coOrg: any) => {
     const coOrgUserId = coOrg.user?._id
       ? coOrg.user._id.toString()
       : coOrg.user?.toString();
-
     return coOrgUserId === userId;
   });
 
@@ -479,7 +477,6 @@ export const getManagementDashboardData = async (
 
   /**
    * 3. ACTIVE TICKET FILTER
-   * Validates standard attendance statuses
    */
   const activeTicketFilter = {
     event: new mongoose.Types.ObjectId(eventId),
@@ -505,8 +502,7 @@ export const getManagementDashboardData = async (
   const stats = metricsData[0] || { totalSold: 0, checkInCount: 0 };
 
   /**
-   * 5. FINANCIAL RECONCILIATION ENGINE
-   * Separates Online Gateway Revenue from Physical Gate Cash Sales
+   * 5. GRANULAR FINANCIAL RECONCILIATION ENGINE
    */
   const transactionStats = await Transaction.aggregate([
     {
@@ -518,24 +514,21 @@ export const getManagementDashboardData = async (
     {
       $group: {
         _id: null,
-        // Gross Online Sales processed by Skaute's payment gateway
         grossOnlineRevenue: {
           $sum: { $cond: [{ $eq: ["$type", "ticket_sale"] }, "$amount", 0] },
         },
-        // Fees accumulated via online sales
         onlinePlatformFees: {
           $sum: { $cond: [{ $eq: ["$type", "ticket_sale"] }, "$fee", 0] },
         },
-        // Physical cash / private POS processed on-premise at the venue gate
+        liquidOnlineNet: {
+          $sum: { $cond: [{ $eq: ["$type", "ticket_sale"] }, "$netAmount", 0] },
+        },
         grossGateRevenue: {
           $sum: { $cond: [{ $eq: ["$type", "gate_sale"] }, "$amount", 0] },
         },
-        // Platform commission debts generated from gate sales
         gatePlatformFees: {
           $sum: { $cond: [{ $eq: ["$type", "gate_sale"] }, "$fee", 0] },
         },
-        // Balance ledger pool (Online sales minus total accumulated platform commissions)
-        totalNetFromTransactions: { $sum: "$netAmount" },
       },
     },
   ]);
@@ -543,30 +536,29 @@ export const getManagementDashboardData = async (
   const financialLedger = transactionStats[0] || {
     grossOnlineRevenue: 0,
     onlinePlatformFees: 0,
+    liquidOnlineNet: 0,
     grossGateRevenue: 0,
     gatePlatformFees: 0,
-    totalNetFromTransactions: 0,
   };
 
-  // Maps properties to standard predictable variables
-  const grossRevenue = Number(financialLedger.grossOnlineRevenue.toFixed(2));
-  const grossGateRevenue = Number(financialLedger.grossGateRevenue.toFixed(2));
-  const totalPlatformFeeAmount = Number(
-    (
-      financialLedger.onlinePlatformFees + financialLedger.gatePlatformFees
-    ).toFixed(2),
+  // Safe Type Normalization — guards against undefined properties blowing up .toFixed()
+  const grossOnline = Number(
+    (financialLedger.grossOnlineRevenue || 0).toFixed(2),
+  );
+  const feesOnline = Number(
+    (financialLedger.onlinePlatformFees || 0).toFixed(2),
+  );
+  const netOnlinePool = Number(
+    (financialLedger.liquidOnlineNet || 0).toFixed(2),
   );
 
-  // What the organizer pocketed net across all streams (Online Net + Offline Cash - Skaute Fees)
-  const organizerTotalNetRevenue = Math.max(
-    Number(
-      (grossRevenue + grossGateRevenue - totalPlatformFeeAmount).toFixed(2),
-    ),
-    0,
+  const grossGate = Number((financialLedger.grossGateRevenue || 0).toFixed(2));
+  const feesGateDebt = Number(
+    (financialLedger.gatePlatformFees || 0).toFixed(2),
   );
 
   /**
-   * 6. PAYOUTS / SETTLEMENTS LEDGER
+   * 6. PAYOUTS & BANK SETTLEMENTS LEDGER
    */
   const payoutAggregation = await Payout.aggregate([
     {
@@ -578,11 +570,11 @@ export const getManagementDashboardData = async (
     {
       $group: {
         _id: null,
-        totalPayoutRequested: { $sum: "$amount" },
-        totalPayoutCompleted: {
+        totalRequested: { $sum: "$amount" },
+        totalCompleted: {
           $sum: { $cond: [{ $eq: ["$status", "completed"] }, "$amount", 0] },
         },
-        totalPendingPayouts: {
+        totalPending: {
           $sum: {
             $cond: [
               { $in: ["$status", ["pending", "processing"]] },
@@ -596,28 +588,42 @@ export const getManagementDashboardData = async (
   ]);
 
   const payoutStats = payoutAggregation[0] || {
-    totalPayoutRequested: 0,
-    totalPayoutCompleted: 0,
-    totalPendingPayouts: 0,
+    totalRequested: 0,
+    totalCompleted: 0,
+    totalPending: 0,
   };
 
+  const payoutsPaid = Number((payoutStats.totalCompleted || 0).toFixed(2));
+  const payoutsPending = Number((payoutStats.totalPending || 0).toFixed(2));
+
   /**
-   * 7. ORGANIZER WITHDRAWABLE BALANCE MATH
-   * Net transaction balance (Online Gross - Total System Fees) minus bank payouts processed/pending
+   * 7. ADVANCED MATHEMATICAL WALLET RECONCILIATION
    */
+  const totalCombinedGrossRevenue = Number(
+    (grossOnline + grossGate).toFixed(2),
+  );
+  const totalSkauteCommissions = Number((feesOnline + feesGateDebt).toFixed(2));
+
+  const totalOrganizerLifetimeNet = Math.max(
+    Number((totalCombinedGrossRevenue - totalSkauteCommissions).toFixed(2)),
+    0,
+  );
+
+  const rawSkauteHeldCash = netOnlinePool;
+
   const withdrawableBalance = Math.max(
     Number(
-      (
-        financialLedger.totalNetFromTransactions -
-        payoutStats.totalPayoutCompleted -
-        payoutStats.totalPendingPayouts
-      ).toFixed(2),
+      (rawSkauteHeldCash - feesGateDebt - payoutsPaid - payoutsPending).toFixed(
+        2,
+      ),
     ),
     0,
   );
 
   /**
-   * 8. QUANTITY AND VALUE SALES BY TIER
+   * 8. QUANTITY AND VALUE SALES BY TIER (FIXED STRATEGY)
+   * Using case-insensitive / trimmed matching on string tier names ensures
+   * data integrity regardless of whether ticketTier ObjectIds exist.
    */
   const tierStats = await Ticket.aggregate([
     { $match: activeTicketFilter },
@@ -631,7 +637,11 @@ export const getManagementDashboardData = async (
   ]);
 
   const salesByTier = event.ticketTiers.map((tier: any) => {
-    const stat = tierStats.find((s) => s._id === tier.name);
+    // Perform clean, case-insensitive string matching fallback configurations
+    const stat = tierStats.find(
+      (s) => s._id?.trim().toLowerCase() === tier.name?.trim().toLowerCase(),
+    );
+
     const tierGrossRevenue = Number(stat?.grossRevenue || 0);
     const tierPlatformFee = Number(
       ((tierGrossRevenue * SKAUTE_FEE_PERCENT) / 100).toFixed(2),
@@ -651,11 +661,10 @@ export const getManagementDashboardData = async (
   });
 
   /**
-   * 9. GUEST LIST ATTENDEES PAGINATION
+   * 9. GUEST LIST ATTENDEES WITH FRONTEND SCHEMA SYNC
    */
   const skip = (page - 1) * limit;
-
-  const [attendees, totalCount] = await Promise.all([
+  const [rawAttendees, totalCount] = await Promise.all([
     Ticket.find({ event: eventId })
       .sort("-createdAt")
       .skip(skip)
@@ -663,12 +672,41 @@ export const getManagementDashboardData = async (
       .populate("owner", "name image email")
       .populate("checkedInBy", "name image")
       .lean(),
-
     Ticket.countDocuments({ event: eventId }),
   ]);
 
+  // Frontend Schema Mapping Loop
+  // Dynamically switches between on-premise 'buyerInfo' schemas and standard 'owner' accounts
+  const attendees = rawAttendees.map((ticket: any) => {
+    // 1. Check if the ticket already has an embedded buyerInfo profile (Gate-generated tickets)
+    if (
+      ticket.buyerInfo &&
+      (ticket.buyerInfo.firstName || ticket.buyerInfo.email)
+    ) {
+      return {
+        ...ticket,
+        buyerInfo: {
+          firstName: ticket.buyerInfo.firstName || "Guest",
+          lastName: ticket.buyerInfo.lastName || "User",
+          email: ticket.buyerInfo.email || "unknown@skaute.com",
+        },
+      };
+    }
+
+    // 2. Fallback: Parse populated user 'owner' data models (Online-purchased tickets)
+    const names = ticket.owner?.name ? ticket.owner.name.split(" ") : ["Guest"];
+    return {
+      ...ticket,
+      buyerInfo: {
+        firstName: names[0],
+        lastName: names.slice(1).join(" ") || "User",
+        email: ticket.owner?.email || "unknown@skaute.com",
+      },
+    };
+  });
+
   /**
-   * 10. FINAL STRUCK STRUCTURAL RESPONSE
+   * 10. CLEAN CLEAN ITEMISED STRUCTURAL DASHBOARD PAYLOAD
    */
   return {
     event,
@@ -680,32 +718,47 @@ export const getManagementDashboardData = async (
       totalPages: Math.ceil(totalCount / limit),
     },
     metrics: {
-      /**
-       * QUANTITIES
-       */
-      totalTicketsSold: stats.totalSold,
-      checkInCount: stats.checkInCount,
-
-      /**
-       * AUDITED MONEY BUCKETS
-       */
-      grossRevenue, // Online income route pool (Clean & uninflated)
-      grossGateRevenue, // Documented venue-front gate sales capital
+      grossRevenue: totalCombinedGrossRevenue,
       platformFeePercent: SKAUTE_FEE_PERCENT,
-      platformFeeAmount: totalPlatformFeeAmount, // Combined commissions (Online + Gate)
-      organizerNetRevenue: organizerTotalNetRevenue,
-
-      /**
-       * WALLET SETTLEMENT CONTROL
-       */
-      totalPayoutRequested: payoutStats.totalPayoutRequested,
-      totalPayoutCompleted: payoutStats.totalPayoutCompleted,
-      totalPendingPayouts: payoutStats.totalPendingPayouts,
-      withdrawableBalance, // Accurately reduced by offline gate debts automatically
-
-      /**
-       * BREAKDOWN BY CATEGORY
-       */
+      platformFeeAmount: totalSkauteCommissions,
+      organizerNetRevenue: totalOrganizerLifetimeNet,
+      withdrawableBalance: withdrawableBalance,
+      ticketQuantities: {
+        totalTicketsSold: stats.totalSold,
+        checkInCount: stats.checkInCount,
+      },
+      financials: {
+        config: {
+          platformFeePercent: SKAUTE_FEE_PERCENT,
+        },
+        overallTotals: {
+          combinedGrossRevenue: totalCombinedGrossRevenue,
+          totalSkauteCommissions: totalSkauteCommissions,
+          organizerLifetimeNetWorth: totalOrganizerLifetimeNet,
+        },
+        onlineSalesChannel: {
+          grossRevenue: grossOnline,
+          skauteCommissions: feesOnline,
+          cleanNetPool: netOnlinePool,
+        },
+        physicalGateChannel: {
+          grossRevenue: grossGate,
+          skauteCommissionsDebt: feesGateDebt,
+          organizerCollectedCash: Math.max(
+            Number((grossGate - feesGateDebt).toFixed(2)),
+            0,
+          ),
+        },
+        skauteVaultLedger: {
+          initialHeldCash: rawSkauteHeldCash,
+          deductions: {
+            gateCommissionsClawback: feesGateDebt,
+            payoutsTransferred: payoutsPaid,
+            payoutsLockedInTransit: payoutsPending,
+          },
+          finalWithdrawableBalance: withdrawableBalance,
+        },
+      },
       salesByTier,
     },
   };

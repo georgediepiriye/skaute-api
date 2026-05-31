@@ -9,10 +9,8 @@ const SKAUTE_BLUE = "#0052FF";
 const SKAUTE_YELLOW = "#FFD700";
 const MIDNIGHT_DARK = "#0B0E14";
 
-// PRODUCTION LOGO URL: Replace this string with your live hosted domain URL
-// (e.g., "https://skaute.com/images/skaute_logo.jpg") once deployed to production.
 const LOGO_PUBLIC_URL =
-  "https://res.cloudinary.com/dzhfiblg7/image/upload/f_auto,q_auto,w_800/v1778054500/kivo_events/inhouse/skaute.webp";
+  "https://res.cloudinary.com/dzhfiblg7/image/upload/f_auto,q_auto,w_800/v1778054500/kivo_events/inhouse/skaute.jpg";
 
 /**
  * Centered Brand Header Component containing the clean white logo isolation layout
