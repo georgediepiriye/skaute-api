@@ -40,6 +40,10 @@ const envVarsSchema = z
     // Infrastructure
     REDIS_PUBLIC_URL: z.string().describe("Redis public url"),
     CLIENT_ORIGIN: z.string().url().describe("Frontend client URL"),
+    CLIENT_ORIGIN_WWW: z
+      .string()
+      .url()
+      .describe("Frontend client URL with www prefix"),
     API_URL: z.string().url().describe("Public API URL"),
 
     // Third-party APIs
@@ -123,6 +127,7 @@ const config = {
   },
   redisUrl: envVars.REDIS_PUBLIC_URL,
   clientUrl: envVars.CLIENT_ORIGIN,
+  clientUrlWWW: envVars.CLIENT_ORIGIN_WWW,
   apiUrl: envVars.API_URL,
   sendGridApiKey: envVars.SENDGRID_API_KEY,
   skauteFeePercent: envVars.SKAUTE_FEE_PERCENT,

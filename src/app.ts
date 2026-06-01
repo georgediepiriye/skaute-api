@@ -38,8 +38,11 @@ app.use(cookieParser());
 /**
  * PRODUCTION-PROOF CORS ARCHITECTURE
  */
+
+const allowedOrigins = [config.clientUrl, config.clientUrlWWW].filter(Boolean);
+
 const corsOptions = {
-  origin: config.clientUrl,
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
