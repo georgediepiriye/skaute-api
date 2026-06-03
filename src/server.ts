@@ -2,7 +2,7 @@ import app from "./app.js";
 import { connectDB } from "./config/db.js";
 import config from "./config/config.js";
 import { Server } from "http";
-import { initInventoryCron, initVibeDecayCron } from "./utils/cronJobs.js";
+import { initInventoryCron } from "./utils/cronJobs.js";
 import { initSocket } from "./socket.js";
 
 let server: Server;
@@ -16,7 +16,6 @@ const bootstrap = async () => {
 
     // 2. Fire up background workers/crons
     initInventoryCron();
-    initVibeDecayCron();
 
     // 3. Spin up the HTTP Server instance
     server = app.listen(config.port, () => {

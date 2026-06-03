@@ -1,16 +1,19 @@
-import mongoose, { HydratedDocument, Types } from "mongoose";
+import mongoose, {
+  HydratedDocument,
+  Types,
+  CallbackWithoutResultAndOptionalError,
+} from "mongoose";
 
-// Mocking this constant layout to keep your schema code sound.
-// Ensure your actual import path points precisely to your constants file.
+// Mapped precisely to match your upgraded Nigerian social context categories
 const hotspotCategorySlugs = [
   "nightlife",
   "lounge",
+  "localeats",
   "dining",
-  "cafe",
+  "parks",
+  "lifestyle",
   "workspace",
-  "arts",
   "wellness",
-  "retail",
 ];
 
 /**
@@ -52,7 +55,7 @@ const vibeVoteSchema = new mongoose.Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      expires: 21600, // Automatic document cleanup after 6 hours
+      expires: 10800, // Reduced to 3 hours (10800s) to enforce localized system truthfulness
     },
   },
   { _id: false },
@@ -60,10 +63,77 @@ const vibeVoteSchema = new mongoose.Schema(
 
 /**
  * =========================
+ * TYPE SAFETY INTERFACES
+ * =========================
+ */
+export interface IHotspot {
+  title: string;
+  description: string;
+  category: string;
+  status: "CHILL" | "ACTIVE" | "TRENDING" | "HOT";
+  image: string;
+  gallery?: string[];
+  location: {
+    type: "Point";
+    coordinates: number[];
+    address?: string;
+    neighborhood?: string;
+    city: string;
+    state: string;
+  };
+  vibeCheck: IVibeCheck;
+  lastVibeActivityAt: Date;
+  decayAt: Date;
+  energyRadius: number;
+  energyLevel: number;
+  activities: {
+    hasKaraoke: boolean;
+    hasLiveBand: boolean;
+    hasSnooker: boolean;
+    hasPoolside: boolean;
+    hasShisha: boolean;
+    hasVIPLounge: boolean;
+    hasOutdoorSeating: boolean;
+    hasArcadeGames: boolean;
+  };
+  features?: string[];
+  isVerified: boolean;
+  isClaimed: boolean;
+  claimedBy?: Types.ObjectId | null;
+  priceTier: "₦" | "₦₦" | "₦₦₦" | "₦₦₦₦";
+  contact?: {
+    phone?: string;
+    instagram?: string;
+    website?: string;
+  };
+  openingHours?: Array<{
+    day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+    open: string;
+    close: string;
+    isClosed: boolean;
+  }>;
+  analytics: {
+    viewCount: number;
+    savedCount: number;
+  };
+  bestTimeToVisit?: string;
+  isActive: boolean;
+}
+
+export type HotspotDocument = HydratedDocument<IHotspot> & {
+  vibeScore: number;
+  heatIntensity: number;
+  vibeFreshness: number;
+  energyScore: number;
+  computedAuraRadius: number;
+};
+
+/**
+ * =========================
  * HOTSPOT SCHEMA
  * =========================
  */
-const hotspotSchema = new mongoose.Schema(
+const hotspotSchema = new mongoose.Schema<HotspotDocument>(
   {
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
@@ -127,7 +197,7 @@ const hotspotSchema = new mongoose.Schema(
 
     decayAt: {
       type: Date,
-      default: () => new Date(Date.now() + 6 * 60 * 60 * 1000),
+      default: () => new Date(Date.now() + 3 * 60 * 60 * 1000),
       index: true,
     },
 
@@ -208,10 +278,42 @@ hotspotSchema.index({
 
 /**
  * =========================
- * VIRTUALS
+ * AUTOMATED PRE-FETCH SANITIZER HOOK
  * =========================
  */
-hotspotSchema.virtual("allPhotos").get(function () {
+
+hotspotSchema.pre<mongoose.Query<any, any>>(/^find/, async function () {
+  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+  try {
+    // Awaiting the DB update ensures Mongoose naturally moves to the query execution once resolved
+    await this.model.updateMany(
+      {
+        _id: this.getQuery()._id,
+        $or: [
+          { lastVibeActivityAt: { $lt: threeHoursAgo } },
+          { "vibeCheck.totalVotes": 0 },
+        ],
+      },
+      {
+        $set: {
+          "vibeCheck.currentVibe": "CHILL",
+          "vibeCheck.totalVotes": 0,
+          "vibeCheck.counts": { lit: 0, lively: 0, chill: 0, dull: 0 },
+        },
+      },
+    );
+  } catch (err: any) {
+    console.error("⚠️ Sanitizer step skipped:", err);
+  }
+});
+
+/**
+ * =========================
+ * VIRTUALS (With Context-Aware Decay Logic)
+ * =========================
+ */
+hotspotSchema.virtual("allPhotos").get(function (this: HotspotDocument) {
   return [this.image, ...(this.gallery || [])];
 });
 
@@ -221,19 +323,35 @@ hotspotSchema.virtual("upcomingMoves", {
   foreignField: "venueHotspotId",
 });
 
-hotspotSchema.virtual("vibeScore").get(function () {
+// A freshness percentage slider scaling smoothly from 1.0 down to 0.0 over an active 3-hour window
+hotspotSchema.virtual("vibeFreshness").get(function (this: HotspotDocument) {
+  const last = this.lastVibeActivityAt?.getTime() || Date.now();
+  const ageHours = (Date.now() - last) / (1000 * 60 * 60);
+
+  if (ageHours >= 3) return 0;
+  // Cubic curve optimization drops older analytics faster than simple linear sliders
+  return Math.max(0, Math.pow(1 - ageHours / 3, 3));
+});
+
+// Drops out to zero if there's been no action at the location within the core 3-hour block
+hotspotSchema.virtual("vibeScore").get(function (this: HotspotDocument) {
+  const freshness = this.vibeFreshness || 0;
+  if (freshness === 0) return 0;
+
   const c = this.vibeCheck?.counts;
   if (!c) return 0;
-  // Fallbacks applied dynamically to handle pristine unvoted document initialization gracefully
-  return (
+
+  const rawScore =
     (c.lit || 0) * 4 +
     (c.lively || 0) * 3 +
     (c.chill || 0) * 2 +
-    (c.dull || 0) * 1
-  );
+    (c.dull || 0) * 1;
+
+  return rawScore * freshness;
 });
 
-hotspotSchema.virtual("heatIntensity").get(function (this: any) {
+// Calculates ratio of vote values vs perfect score capacity
+hotspotSchema.virtual("heatIntensity").get(function (this: HotspotDocument) {
   const c = this.vibeCheck?.counts;
   if (!c) return 0;
 
@@ -243,93 +361,58 @@ hotspotSchema.virtual("heatIntensity").get(function (this: any) {
   return Math.min((this.vibeScore || 0) / (votes * 4), 1);
 });
 
-hotspotSchema.virtual("vibeFreshness").get(function (this: any) {
-  const last = this.lastVibeActivityAt?.getTime?.() || Date.now();
-  const ageHours = (Date.now() - last) / (1000 * 60 * 60);
-
-  return Math.max(0, 1 - ageHours / 6);
-});
-
-hotspotSchema.virtual("energyScore").get(function (this: any) {
-  const heat = this.heatIntensity || 0;
+// Context Engine: Evaluates live telemetry against Category Lifecycle and Time constraints
+hotspotSchema.virtual("energyScore").get(function (this: HotspotDocument) {
   const freshness = this.vibeFreshness || 0;
+  if (freshness === 0) return 0;
 
-  return Math.round((heat * 0.7 + freshness * 0.3) * 100);
+  const heat = this.heatIntensity || 0;
+
+  // Base blend score configuration
+  let baselineEnergy = (heat * 0.6 + freshness * 0.4) * 100;
+
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentDay = now.getDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
+  const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
+
+  let timeWindowModifier = 1.0;
+
+  // 1. Nightlife & Lounges Strategy
+  if (this.category === "nightlife" || this.category === "lounge") {
+    if (currentHour >= 5 && currentHour < 19) {
+      timeWindowModifier = 0.05; // Drop daytime club/lounge false positives directly to zero
+    } else if (!isWeekend && currentHour >= 23) {
+      timeWindowModifier = 0.75; // Adjust expectations dynamically down during weekday midnight windows
+    }
+  }
+  // 2. Co-Working Spaces Strategy
+  else if (this.category === "workspace") {
+    if (currentHour >= 19 || currentHour < 7 || isWeekend) {
+      timeWindowModifier = 0.05; // De-escalate office data spaces completely when doors are locked
+    }
+  }
+  // 3. Joints & Local Eats (Bole / Bukas) Strategy
+  else if (this.category === "localeats") {
+    if (currentHour >= 21 || currentHour < 9) {
+      timeWindowModifier = 0.1; // Extinguish food spot data markers completely at late night periods
+    }
+  }
+
+  return Math.round(
+    Math.max(0, Math.min(100, baselineEnergy * timeWindowModifier)),
+  );
 });
 
-hotspotSchema.virtual("computedAuraRadius").get(function (this: any) {
-  const base = 20;
+// Controls Map Aura graphic scale properties based on pure dynamic runtime engine scores
+hotspotSchema.virtual("computedAuraRadius").get(function (
+  this: HotspotDocument,
+) {
+  const baseRadius = 20;
   const energy = this.energyScore || 0;
 
-  return base + energy * 1.2;
+  return baseRadius + energy * 1.2;
 });
-
-/**
- * =========================
- * TYPE SAFETY INTERFACES
- * =========================
- */
-export interface IHotspot {
-  title: string;
-  description: string;
-  category: string;
-  status: "CHILL" | "ACTIVE" | "TRENDING" | "HOT";
-  image: string;
-  gallery?: string[];
-  location: {
-    type: "Point";
-    coordinates: number[];
-    address?: string;
-    neighborhood?: string;
-    city: string;
-    state: string;
-  };
-  vibeCheck: IVibeCheck;
-  lastVibeActivityAt: Date;
-  decayAt: Date;
-  energyRadius: number;
-  energyLevel: number;
-  activities: {
-    hasKaraoke: boolean;
-    hasLiveBand: boolean;
-    hasSnooker: boolean;
-    hasPoolside: boolean;
-    hasShisha: boolean;
-    hasVIPLounge: boolean;
-    hasOutdoorSeating: boolean;
-    hasArcadeGames: boolean;
-  };
-  features?: string[];
-  isVerified: boolean;
-  isClaimed: boolean;
-  claimedBy?: Types.ObjectId | null;
-  priceTier: "₦" | "₦₦" | "₦₦₦" | "₦₦₦₦";
-  contact?: {
-    phone?: string;
-    instagram?: string;
-    website?: string;
-  };
-  openingHours?: Array<{
-    day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
-    open: string;
-    close: string;
-    isClosed: boolean;
-  }>;
-  analytics: {
-    viewCount: number;
-    savedCount: number;
-  };
-  bestTimeToVisit?: string;
-  isActive: boolean;
-}
-
-export type HotspotDocument = HydratedDocument<IHotspot> & {
-  vibeScore: number;
-  heatIntensity: number;
-  vibeFreshness: number;
-  energyScore: number;
-  computedAuraRadius: number;
-};
 
 const Hotspot =
   (mongoose.models.Hotspot as mongoose.Model<HotspotDocument>) ||

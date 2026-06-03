@@ -68,28 +68,28 @@ const hotspotsData = [
   },
   {
     title: "Sky Bar PH",
-    category: HOTSPOT_CATEGORIES.nightlife?.slug || "nightlife",
+    category: HOTSPOT_CATEGORIES.lounge?.slug || "lounge", // Shifted to lounge to align with rooftop profile
     status: "TRENDING",
     neighborhood: "Genesis",
     coords: [7.002, 4.835],
   },
   {
     title: "Bole King",
-    category: HOTSPOT_CATEGORIES.dining?.slug || "dining",
+    category: HOTSPOT_CATEGORIES.localEats?.slug || "localeats",
     status: "HOT",
     neighborhood: "Garrison",
     coords: [6.9925, 4.8142],
   },
   {
     title: "Native Tray",
-    category: HOTSPOT_CATEGORIES.dining?.slug || "dining",
+    category: HOTSPOT_CATEGORIES.localEats?.slug || "localeats",
     status: "ACTIVE",
     neighborhood: "GRA",
     coords: [6.982, 4.819],
   },
   {
     title: "Vintage Cafe",
-    category: HOTSPOT_CATEGORIES.cafe?.slug || "cafe",
+    category: HOTSPOT_CATEGORIES.dining?.slug || "dining", // Consolidated under new Fine Dining & Cafes category
     status: "CHILL",
     neighborhood: "GRA Phase 2",
     coords: [6.975, 4.815],
@@ -103,21 +103,21 @@ const hotspotsData = [
   },
   {
     title: "Rivers State Museum",
-    category: HOTSPOT_CATEGORIES.arts?.slug || "arts",
+    category: HOTSPOT_CATEGORIES.lifestyle?.slug || "lifestyle", // Mapped into Culture & Malls
     status: "CHILL",
     neighborhood: "Secretariat",
     coords: [7.008, 4.785],
   },
   {
     title: "PH Pleasure Park",
-    category: HOTSPOT_CATEGORIES.wellness?.slug || "wellness",
+    category: HOTSPOT_CATEGORIES.parks?.slug || "parks", // Mapped into Parks & Nature
     status: "TRENDING",
     neighborhood: "Rumuola",
     coords: [7.0094, 4.8239],
   },
   {
     title: "Port Harcourt Mall",
-    category: HOTSPOT_CATEGORIES.retail?.slug || "retail",
+    category: HOTSPOT_CATEGORIES.lifestyle?.slug || "lifestyle", // Mapped into Culture & Malls
     status: "ACTIVE",
     neighborhood: "Azikiwe",
     coords: [7.005, 4.7797],
@@ -132,12 +132,12 @@ async function seedDatabase() {
     await mongoose.connect(uri);
     console.log("📡 Connected to database instance.");
 
-    console.log("🧹 Cleaning database collections...");
+    console.log("🧹 Cleaning transient ephemeral database collections...");
     if (mongoose.connection.collections["events"]) await Event.deleteMany({});
     if (mongoose.connection.collections["users"]) await User.deleteMany({});
-    if (mongoose.connection.collections["hotspots"])
-      await Hotspot.deleteMany({});
-    console.log("🗑️ Cleared existing Events, Users, and Hotspots.");
+
+    // Note: Hotspot collection deletion completely removed here to shield real locations from loss.
+    console.log("🗑️ Cleared existing transient Events and Users.");
 
     // ==========================================
     // 1. SEED USERS
@@ -370,15 +370,23 @@ async function seedDatabase() {
     );
 
     // ==========================================
-    // 3. SEED HOTSPOTS
+    // 3. SEED HOTSPOTS (Production-Safe Check)
     // ==========================================
-    console.log("📍 Seeding Hotspots with structural counter syncing...");
+    console.log("📍 Processing Location Matrix...");
 
-    const formattedHotspots = hotspotsData.map((h, index) => {
+    for (const h of hotspotsData) {
+      // Check if the venue exists by title to protect manual entries
+      const existingHotspot = await Hotspot.findOne({ title: h.title });
+
+      if (existingHotspot) {
+        console.log(
+          `⏩ [Skipped] "${h.title}" already exists in the database.`,
+        );
+        continue;
+      }
+
       const voteCount = faker.number.int({ min: 5, max: 25 });
       const assignedVotes: any[] = [];
-
-      // Seed synchronous counters to fuel your virtual maps metrics correctly
       const counts = { lit: 0, lively: 0, chill: 0, dull: 0 };
 
       for (let k = 0; k < voteCount; k++) {
@@ -392,17 +400,15 @@ async function seedDatabase() {
         assignedVotes.push({
           userId: faker.helpers.arrayElement(createdUsers)._id,
           vibe: chosenVibe,
-          createdAt: faker.date.recent({ days: 0.1 }), // Keeps freshness calculations high
+          createdAt: new Date(), // Keep baseline data high in freshness calculations
         });
 
-        // Increment specific lowercase map tracker tags synchronously
         if (chosenVibe === "LIT") counts.lit++;
         if (chosenVibe === "LIVELY") counts.lively++;
         if (chosenVibe === "CHILL") counts.chill++;
         if (chosenVibe === "DULL") counts.dull++;
       }
 
-      // Calculate current vibe title based on the generated seed pool values
       let topVibe = "UNKNOWN";
       let maxVotes = 0;
       Object.entries(counts).forEach(([key, val]) => {
@@ -427,7 +433,7 @@ async function seedDatabase() {
 
       const now = new Date();
 
-      return {
+      await Hotspot.create({
         title: h.title,
         description: `Discover the best of Port Harcourt at ${h.title}. A top-rated destination in ${h.neighborhood} curated for the Skaute community.`,
         category: h.category,
@@ -436,7 +442,6 @@ async function seedDatabase() {
         gallery: [
           `https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=60`,
           `https://images.unsplash.com/photo-1574097656146-0b43b7660cb6?w=400&q=60`,
-          `https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=60`,
         ],
         location: {
           type: "Point",
@@ -501,14 +506,12 @@ async function seedDatabase() {
             ? "9:00 PM - 2:00 AM"
             : "4:00 PM - 8:00 PM",
         isActive: true,
-      };
-    });
+      });
 
-    await Hotspot.insertMany(formattedHotspots);
-    console.log(
-      `✅ Successfully seeded ${formattedHotspots.length} hotspots with operational sync counters!`,
-    );
+      console.log(`🌱 [Seeded] New baseline venue added: ${h.title}`);
+    }
 
+    console.log("✅ Hotspots syncing complete without tracking losses.");
     console.log("\n----------------------------------");
     console.log("🚀 Skaute Database Fully Seeded with Events & Hotspots!");
     console.log("----------------------------------");

@@ -107,62 +107,68 @@ export const EVENT_CATEGORIES = {
  * Designed for location-based discovery and map filtering.
  */
 export const HOTSPOT_CATEGORIES = {
-  // --- HIGH ENERGY ---
+  // --- HIGH ENERGY & EVENING ---
   nightlife: {
     label: "Nightlife",
     slug: "nightlife",
-    description: "Clubs, bars, and late-night entertainment.",
-    icon: "Music",
+    description: "Nightclubs, high-energy sports bars, and late-night spots.",
+    icon: "Moon",
   },
   lounge: {
-    label: "Lounge",
+    label: "Lounges & Grills",
     slug: "lounge",
-    description: "Relaxed settings for drinks and conversation.",
-    icon: "Beer",
+    description:
+      "Rooftop setups, live bands, suya spots, and chill social drinking.",
+    icon: "Wine",
   },
 
   // --- CULINARY ---
+  localEats: {
+    label: "Joints & Local Eats",
+    slug: "localeats",
+    description:
+      "Bole kings, local bukas, point-and-kill fish, and cultural spots.",
+    icon: "Flame",
+  },
   dining: {
-    label: "Dining",
+    label: "Fine Dining & Cafes",
     slug: "dining",
-    description: "Restaurants and casual food spots.",
+    description:
+      "Upscale continental restaurants, date spots, pastry cafes, and ice cream.",
     icon: "Utensils",
   },
-  cafe: {
-    label: "Cafe",
-    slug: "cafe",
-    description: "Coffee shops and breakfast nooks.",
-    icon: "Coffee",
-  },
 
-  // --- PRODUCTIVITY & CULTURE ---
-  workspace: {
-    label: "Workspace",
-    slug: "workspace",
-    description: "Co-working spaces and quiet study zones.",
-    icon: "Laptop",
+  parks: {
+    label: "Parks & Nature",
+    slug: "parks",
+    description:
+      "Amusement parks, public gardens, beaches, and open-air hangouts.",
+    icon: "Leaf",
   },
-  arts: {
-    label: "Arts & Gallery",
-    slug: "arts",
-    description: "Creative hubs and exhibition spaces.",
-    icon: "Palette",
-  },
-
-  // --- ACTIVE & OUTDOORS ---
-  wellness: {
-    label: "Wellness Hub",
-    slug: "wellness",
-    description: "Gyms, parks, and recreational centers.",
-    icon: "Heart",
-  },
-  retail: {
-    label: "Retail Hub",
-    slug: "retail",
-    description: "Malls and popular shopping districts.",
+  lifestyle: {
+    label: "Culture & Malls",
+    slug: "lifestyle",
+    description:
+      "Shopping malls, cinemas, art galleries, and lifestyle retail.",
     icon: "ShoppingBag",
   },
+
+  // --- PRODUCTIVITY & HEALTH ---
+  workspace: {
+    label: "Work & Study",
+    slug: "workspace",
+    description: "Co-working hubs, tech spaces, and quiet study zones.",
+    icon: "Laptop",
+  },
+  wellness: {
+    label: "Wellness & Sports",
+    slug: "wellness",
+    description: "Gyms, spas, and 5-aside weekend football turfs.",
+    icon: "Activity",
+  },
 } as const;
+
+export const hotspotCategorySlugs = Object.keys(HOTSPOT_CATEGORIES);
 
 /**
  * HOTSPOT HEAT LEVELS

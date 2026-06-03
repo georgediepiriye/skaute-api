@@ -7,6 +7,8 @@ import {
   getHotspotDetailsSchema,
 } from "../validation/hotspotValidation.js";
 import { protect, restrictTo } from "../middleware/authMiddleware.js";
+import multer from "multer";
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router = Router();
 
@@ -25,12 +27,14 @@ router.post(
   hotspotController.castHotspotVibeCheck,
 );
 
-// 👑 Admin Control Routes (B2B Seed Platform Pipeline Setup)
 router.post(
   "/",
   protect,
   restrictTo("admin"),
-  validate(createHotspotSchema),
+  upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "gallery", maxCount: 5 },
+  ]),
   hotspotController.createHotspot,
 );
 
