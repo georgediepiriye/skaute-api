@@ -52,79 +52,72 @@ const TIER_TEMPLATES = [
 ];
 
 const hotspotsData = [
-  // --- NIGHTLIFE & LOUNGE (High Energy) ---
   {
     title: "Casablanca Sports Bar",
-    category: HOTSPOT_CATEGORIES.nightlife.slug,
+    category: HOTSPOT_CATEGORIES.nightlife?.slug || "nightlife",
     status: "HOT",
     neighborhood: "GRA Phase 3",
     coords: [6.978, 4.811],
   },
   {
     title: "Asia Town",
-    category: HOTSPOT_CATEGORIES.lounge.slug,
+    category: HOTSPOT_CATEGORIES.lounge?.slug || "lounge",
     status: "TRENDING",
     neighborhood: "Old GRA",
     coords: [7.011, 4.782],
   },
   {
     title: "Sky Bar PH",
-    category: HOTSPOT_CATEGORIES.nightlife.slug,
+    category: HOTSPOT_CATEGORIES.nightlife?.slug || "nightlife",
     status: "TRENDING",
     neighborhood: "Genesis",
     coords: [7.002, 4.835],
   },
-
-  // --- DINING & CAFE (Culinary) ---
   {
     title: "Bole King",
-    category: HOTSPOT_CATEGORIES.dining.slug,
+    category: HOTSPOT_CATEGORIES.dining?.slug || "dining",
     status: "HOT",
     neighborhood: "Garrison",
     coords: [6.9925, 4.8142],
   },
   {
     title: "Native Tray",
-    category: HOTSPOT_CATEGORIES.dining.slug,
+    category: HOTSPOT_CATEGORIES.dining?.slug || "dining",
     status: "ACTIVE",
     neighborhood: "GRA",
     coords: [6.982, 4.819],
   },
   {
     title: "Vintage Cafe",
-    category: HOTSPOT_CATEGORIES.cafe.slug,
+    category: HOTSPOT_CATEGORIES.cafe?.slug || "cafe",
     status: "CHILL",
     neighborhood: "GRA Phase 2",
     coords: [6.975, 4.815],
   },
-
-  // --- WORKSPACE & ARTS (Productivity & Culture) ---
   {
     title: "Skaute Hub",
-    category: HOTSPOT_CATEGORIES.workspace.slug,
+    category: HOTSPOT_CATEGORIES.workspace?.slug || "workspace",
     status: "ACTIVE",
     neighborhood: "Trans Amadi",
     coords: [7.032, 4.825],
   },
   {
     title: "Rivers State Museum",
-    category: HOTSPOT_CATEGORIES.arts.slug,
+    category: HOTSPOT_CATEGORIES.arts?.slug || "arts",
     status: "CHILL",
     neighborhood: "Secretariat",
     coords: [7.008, 4.785],
   },
-
-  // --- WELLNESS & RETAIL (Active & Outdoors) ---
   {
     title: "PH Pleasure Park",
-    category: HOTSPOT_CATEGORIES.wellness.slug,
+    category: HOTSPOT_CATEGORIES.wellness?.slug || "wellness",
     status: "TRENDING",
     neighborhood: "Rumuola",
     coords: [7.0094, 4.8239],
   },
   {
     title: "Port Harcourt Mall",
-    category: HOTSPOT_CATEGORIES.retail.slug,
+    category: HOTSPOT_CATEGORIES.retail?.slug || "retail",
     status: "ACTIVE",
     neighborhood: "Azikiwe",
     coords: [7.005, 4.7797],
@@ -135,12 +128,15 @@ async function seedDatabase() {
   try {
     const uri = process.env.DATABASE_URL || process.env.MONGO_URI;
     if (!uri) throw new Error("Database connection string missing in .env");
+
     await mongoose.connect(uri);
+    console.log("📡 Connected to database instance.");
 
     console.log("🧹 Cleaning database collections...");
-    await Event.deleteMany({});
-    await User.deleteMany({});
-    await Hotspot.deleteMany({});
+    if (mongoose.connection.collections["events"]) await Event.deleteMany({});
+    if (mongoose.connection.collections["users"]) await User.deleteMany({});
+    if (mongoose.connection.collections["hotspots"])
+      await Hotspot.deleteMany({});
     console.log("🗑️ Cleared existing Events, Users, and Hotspots.");
 
     // ==========================================
@@ -169,12 +165,10 @@ async function seedDatabase() {
     // ==========================================
     // 2. SEED EVENTS
     // ==========================================
-    const categoryKeys = Object.keys(EVENT_CATEGORIES);
-    const typeKeys = Object.keys(EVENT_TYPES);
+    const categoryKeys = Object.keys(EVENT_CATEGORIES || {});
+    const typeKeys = Object.keys(EVENT_TYPES || {});
 
-    console.log(
-      "🎲 Generating 100 high-quality events with Platform Overrides...",
-    );
+    console.log("🎲 Generating 100 high-quality events...");
 
     const eventBatch = Array.from({ length: 100 }).map((_, i) => {
       const host = faker.helpers.arrayElement(createdUsers);
@@ -182,8 +176,9 @@ async function seedDatabase() {
       const isVerified = Math.random() > 0.7;
       const isFeatured = Math.random() > 0.85;
       const isBoosted = Math.random() > 0.9;
-      const isSoldOut = Math.random() > 0.85;
+      const isSoldOut = Math.random() > 0.55;
       const isSkauteHosted = Math.random() > 0.93;
+      const isCancelled = false;
 
       const status: ("verified" | "featured")[] = [];
       if (isVerified) status.push("verified");
@@ -191,15 +186,19 @@ async function seedDatabase() {
 
       const boostExpiry = isBoosted ? faker.date.soon({ days: 7 }) : undefined;
 
-      const priorityLevel = calculatePriorityScore({
-        status,
-        isBoosted,
-        boostExpiry,
-        isSkauteHosted,
-      });
+      let priorityLevel = 0;
+      if (typeof calculatePriorityScore === "function") {
+        priorityLevel = calculatePriorityScore({
+          status,
+          isBoosted,
+          boostExpiry,
+          isSkauteHosted,
+          isCancelled,
+        });
+      }
 
       const formatRoll = Math.random();
-      let eventFormat: "physical" | "hybrid" | "online" =
+      let eventFormat =
         formatRoll < 0.75 ? "physical" : formatRoll < 0.9 ? "hybrid" : "online";
 
       const isOnline = eventFormat === "online" || eventFormat === "hybrid";
@@ -240,14 +239,21 @@ async function seedDatabase() {
           `${faker.commerce.productAdjective()}-${i}-${Date.now()}`,
         ),
         description: faker.commerce.productDescription(),
-        category: faker.helpers.arrayElement(categoryKeys),
-        type: faker.helpers.arrayElement(typeKeys),
+        category:
+          categoryKeys.length > 0
+            ? faker.helpers.arrayElement(categoryKeys)
+            : "nightlife",
+        type:
+          typeKeys.length > 0
+            ? faker.helpers.arrayElement(typeKeys)
+            : "activity",
         status,
+        approvalStatus: "approved",
         priorityLevel,
         isBoosted,
         isSoldOut,
+        isCancelled,
         boostExpiry,
-
         isSkauteHosted,
         boostTier: isBoosted
           ? faker.helpers.arrayElement(["standard", "premium"])
@@ -259,8 +265,6 @@ async function seedDatabase() {
         featuredAt: isFeatured
           ? faker.date.past({ years: 0.05, refDate: startDate })
           : undefined,
-
-        approvalStatus: "approved",
         eventFormat,
         isOnline,
         startDate,
@@ -268,6 +272,7 @@ async function seedDatabase() {
         createdAt,
         image: faker.helpers.arrayElement(SKAUTE_EVENT_IMAGES),
         organizer: host._id,
+        coOrganizers: [],
         organizerType: host.role === "organizer" ? "business" : "individual",
         isPublic: true,
         allowAnonymous: faker.datatype.boolean(),
@@ -286,9 +291,18 @@ async function seedDatabase() {
           ["live music", "networking", "party", "tech", "web3"],
           3,
         ),
-        isCancelled: false,
         ticketTiers: [],
+        discounts: [],
         isFree: true,
+        ticketingType: "none",
+        ticketsSold: faker.number.int({ min: 0, max: attendees }),
+        totalCapacity: null,
+        isRecurring: false,
+        recurrence: {
+          frequency: "none",
+          interval: 1,
+          daysOfWeek: [],
+        },
       };
 
       const ticketingType = faker.helpers.arrayElement([
@@ -307,7 +321,6 @@ async function seedDatabase() {
 
         eventData.ticketTiers = template.map((name, idx) => {
           const capacity = faker.number.int({ min: 50, max: 200 });
-
           const isNaturallyFull = Math.random() > 0.9;
           const sold = isNaturallyFull
             ? capacity
@@ -318,7 +331,10 @@ async function seedDatabase() {
             price: basePrice * (idx + 1),
             capacity,
             sold,
+            description:
+              faker.commerce.productAdjective() + " access tier pass.",
             salesEnd: faker.date.soon({ days: 2, refDate: startDate }),
+            isSoldOut: isNaturallyFull,
           };
         });
       } else if (ticketingType === "external") {
@@ -349,44 +365,148 @@ async function seedDatabase() {
     });
 
     await Event.insertMany(eventBatch);
-    console.log("✅ Successfully seeded 100 high-quality events.");
+    console.log(
+      "✅ Successfully seeded 100 high-quality schema-validated events.",
+    );
 
     // ==========================================
     // 3. SEED HOTSPOTS
     // ==========================================
-    console.log("📍 Seeding Hotspots...");
-    const formattedHotspots = hotspotsData.map((h, index) => ({
-      title: h.title,
-      category: h.category,
-      status: h.status || "CHILL",
-      description: `Discover the best of Port Harcourt at ${h.title}. A top-rated ${h.category} destination in ${h.neighborhood} curated for the skaute community.`,
-      image: `https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80`,
-      gallery: [
-        `https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=60&sig=${index}1`,
-        `https://images.unsplash.com/photo-1574097656146-0b43b7660cb6?w=400&q=60&sig=${index}2`,
-        `https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=60&sig=${index}3`,
-        `https://images.unsplash.com/photo-1559333086-b0a56225a93c?w=400&q=60&sig=${index}4`,
-        `https://images.unsplash.com/photo-1514525253344-9914f255399c?w=400&q=60&sig=${index}5`,
-      ],
-      location: {
-        type: "Point",
-        coordinates: h.coords,
-        address: `${h.neighborhood}, Port Harcourt, Rivers State`,
-        neighborhood: h.neighborhood,
-        city: "Port Harcourt",
-        state: "Rivers State",
-      },
-      rating: parseFloat((Math.random() * (5 - 4.3) + 4.3).toFixed(1)),
-      bestTimeToVisit:
-        h.category === "nightlife" || h.category === "lounge"
-          ? "8:00 PM - Late"
-          : "10:00 AM - 7:00 PM",
-      isActive: true,
-    }));
+    console.log("📍 Seeding Hotspots with structural counter syncing...");
+
+    const formattedHotspots = hotspotsData.map((h, index) => {
+      const voteCount = faker.number.int({ min: 5, max: 25 });
+      const assignedVotes: any[] = [];
+
+      // Seed synchronous counters to fuel your virtual maps metrics correctly
+      const counts = { lit: 0, lively: 0, chill: 0, dull: 0 };
+
+      for (let k = 0; k < voteCount; k++) {
+        const chosenVibe = faker.helpers.arrayElement([
+          "LIT",
+          "LIVELY",
+          "CHILL",
+          "DULL",
+        ]);
+
+        assignedVotes.push({
+          userId: faker.helpers.arrayElement(createdUsers)._id,
+          vibe: chosenVibe,
+          createdAt: faker.date.recent({ days: 0.1 }), // Keeps freshness calculations high
+        });
+
+        // Increment specific lowercase map tracker tags synchronously
+        if (chosenVibe === "LIT") counts.lit++;
+        if (chosenVibe === "LIVELY") counts.lively++;
+        if (chosenVibe === "CHILL") counts.chill++;
+        if (chosenVibe === "DULL") counts.dull++;
+      }
+
+      // Calculate current vibe title based on the generated seed pool values
+      let topVibe = "UNKNOWN";
+      let maxVotes = 0;
+      Object.entries(counts).forEach(([key, val]) => {
+        if (val > maxVotes) {
+          maxVotes = val;
+          topVibe = key.toUpperCase();
+        }
+      });
+
+      const rawFeatures = [
+        "Cocktails",
+        "Rooftop",
+        "Parking",
+        "Good Music",
+        "Fast Wi-Fi",
+        "Air Conditioning",
+      ];
+      const chosenFeatures = faker.helpers.arrayElements(rawFeatures, {
+        min: 2,
+        max: 4,
+      });
+
+      const now = new Date();
+
+      return {
+        title: h.title,
+        description: `Discover the best of Port Harcourt at ${h.title}. A top-rated destination in ${h.neighborhood} curated for the Skaute community.`,
+        category: h.category,
+        status: h.status || "CHILL",
+        image: `https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80`,
+        gallery: [
+          `https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=60`,
+          `https://images.unsplash.com/photo-1574097656146-0b43b7660cb6?w=400&q=60`,
+          `https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=60`,
+        ],
+        location: {
+          type: "Point",
+          coordinates: h.coords,
+          address: `${h.neighborhood}, Port Harcourt, Rivers State`,
+          neighborhood: h.neighborhood,
+          city: "Port Harcourt",
+          state: "Rivers State",
+        },
+        vibeCheck: {
+          votes: assignedVotes,
+          currentVibe: maxVotes > 0 ? topVibe : "CHILL",
+          totalVotes: voteCount,
+          counts,
+          lastUpdated: now,
+        },
+        lastVibeActivityAt: now,
+        decayAt: new Date(now.getTime() + 6 * 60 * 60 * 1000),
+        energyRadius: 25,
+        energyLevel: 0,
+        activities: {
+          hasKaraoke: faker.datatype.boolean(),
+          hasLiveBand:
+            h.category === "nightlife" || h.category === "lounge"
+              ? faker.datatype.boolean()
+              : false,
+          hasSnooker: faker.datatype.boolean(),
+          hasPoolside: faker.datatype.boolean(),
+          hasShisha:
+            h.category === "nightlife" || h.category === "lounge"
+              ? faker.datatype.boolean()
+              : false,
+          hasVIPLounge: faker.datatype.boolean(),
+          hasOutdoorSeating: faker.datatype.boolean(),
+          hasArcadeGames: false,
+        },
+        features: chosenFeatures,
+        isVerified: true,
+        isClaimed: false,
+        claimedBy: null,
+        priceTier: faker.helpers.arrayElement(["₦", "₦₦", "₦₦₦", "₦₦₦₦"]),
+        contact: {
+          phone: "+234" + faker.string.numeric(10),
+          instagram: `@${h.title.toLowerCase().replace(/[^a-z0-9]/g, "")}_ph`,
+          website: faker.internet.url(),
+        },
+        openingHours: [
+          { day: "Mon", open: "12:00", close: "00:00", isClosed: false },
+          { day: "Tue", open: "12:00", close: "00:00", isClosed: false },
+          { day: "Wed", open: "12:00", close: "00:00", isClosed: false },
+          { day: "Thu", open: "12:00", close: "02:00", isClosed: false },
+          { day: "Fri", open: "14:00", close: "04:00", isClosed: false },
+          { day: "Sat", open: "14:00", close: "04:00", isClosed: false },
+          { day: "Sun", open: "14:00", close: "01:00", isClosed: false },
+        ],
+        analytics: {
+          viewCount: faker.number.int({ min: 120, max: 2500 }),
+          savedCount: faker.number.int({ min: 10, max: 430 }),
+        },
+        bestTimeToVisit:
+          h.category === "nightlife" || h.category === "lounge"
+            ? "9:00 PM - 2:00 AM"
+            : "4:00 PM - 8:00 PM",
+        isActive: true,
+      };
+    });
 
     await Hotspot.insertMany(formattedHotspots);
     console.log(
-      `✅ Successfully seeded ${formattedHotspots.length} hotspots using exact constants!`,
+      `✅ Successfully seeded ${formattedHotspots.length} hotspots with operational sync counters!`,
     );
 
     console.log("\n----------------------------------");

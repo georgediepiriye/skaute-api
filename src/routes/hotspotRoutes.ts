@@ -18,9 +18,8 @@ router.get(
   hotspotController.getHotspotDetails,
 );
 
-// 🔒 Protected App Interaction Routes
 router.post(
-  "/:hotspotId/vibe-check",
+  "/:hotspotId/vibe",
   protect,
   validate(castVibeCheckSchema),
   hotspotController.castHotspotVibeCheck,

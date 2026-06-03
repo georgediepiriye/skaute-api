@@ -44,6 +44,7 @@ jobs:
           # Infrastructure
           REDIS_PUBLIC_URL: redis://localhost:6379
           CLIENT_ORIGIN: http://localhost:3000
+          CLIENT_ORIGIN_WWW: http://www.localhost:3000
           API_URL: http://localhost:5000
           SKAUTE_FEE_PERCENTAGE: "0.05"
 

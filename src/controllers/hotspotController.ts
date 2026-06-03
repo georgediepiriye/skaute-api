@@ -62,18 +62,21 @@ export const castHotspotVibeCheck = async (
   next: NextFunction,
 ) => {
   try {
-    // req.user._id is populated via your auth protection middleware layer
-    const updatedHotspot = await hotspotService.castVibe(
+    const hotspot = await hotspotService.castVibe(
       req.params.hotspotId,
       req.user._id,
       req.body.vibe,
     );
+
     res.status(httpStatus.OK).json({
       status: "success",
-      message: "Vibe check counted successfully",
+      message: "Vibe recorded successfully",
       data: {
-        currentVibe: updatedHotspot.vibeCheck.currentVibe,
-        totalActiveVotes: updatedHotspot.vibeCheck.votes.length,
+        hotspotId: hotspot._id,
+
+        vibeCheck: hotspot.vibeCheck,
+
+        status: hotspot.status,
       },
     });
   } catch (error) {

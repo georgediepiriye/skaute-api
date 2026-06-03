@@ -6,6 +6,8 @@ import { ORDER_STATUS } from "../lib/constants.js";
 import { PaystackService } from "../utils/paystackServices.js";
 import { fulfillOrder } from "../controllers/services/ticketService.js";
 import logger from "./logger.js";
+import Hotspot from "../models/Hotspot.js";
+import { getIO } from "../socket.js";
 
 export const initInventoryCron = () => {
   // Runs every 5 minutes
@@ -16,7 +18,6 @@ export const initInventoryCron = () => {
     // PHASE 1: RECONCILE WITH PAYSTACK FIRST
     // ==========================================
     try {
-      // Find orders matching the criteria BEFORE we pull them into a transaction lock
       const candidatesForAudit = await Order.find({
         status: ORDER_STATUS.PENDING,
         expiresAt: { $lt: new Date() },
@@ -31,7 +32,6 @@ export const initInventoryCron = () => {
             order.paymentReference,
           );
 
-          // If they actually successfully paid at the last second, fulfill it now!
           if (paystackData?.data?.status === "success") {
             logger.info(
               `CRON RECONCILIATION: Found paid ghost transaction! Fulfilling Ref=${order.paymentReference}`,
@@ -46,7 +46,6 @@ export const initInventoryCron = () => {
           logger.error(
             `CRON AUDIT ERROR: Failed to cross-check reference ${order.paymentReference}: ${paystackError.message}`,
           );
-          // We don't break the loop here; let individual order errors fail silently so others process
         }
       }
     } catch (phase1Error: any) {
@@ -63,7 +62,7 @@ export const initInventoryCron = () => {
     try {
       session.startTransaction();
 
-      // Fetch candidate targets again (any that were fulfilled in Phase 1 are no longer PENDING)
+      // Fetch fresh candidate targets that didn't get fulfilled during Phase 1
       const expiredOrders = await Order.find({
         status: ORDER_STATUS.PENDING,
         expiresAt: { $lt: new Date() },
@@ -78,53 +77,49 @@ export const initInventoryCron = () => {
       }
 
       logger.info(
-        `CRON: Releasing inventory for ${expiredOrders.length} truly abandoned orders.`,
+        `CRON: Processing inventory release for ${expiredOrders.length} orders.`,
       );
 
+      const orderBulkOps = [];
+      const eventBulkOps = [];
+
       for (const order of expiredOrders) {
-        // ATOMIC UPDATE: Mark the order as expired ONLY if it is still PENDING.
-        const updatedOrder = await Order.findOneAndUpdate(
-          {
-            _id: order._id,
-            status: ORDER_STATUS.PENDING,
+        // Prepare atomic switch for order statuses
+        orderBulkOps.push({
+          updateOne: {
+            filter: { _id: order._id, status: ORDER_STATUS.PENDING },
+            update: { $set: { status: ORDER_STATUS.EXPIRED } },
           },
-          {
-            $set: { status: ORDER_STATUS.EXPIRED },
-          },
-          {
-            session,
-            new: true,
-          },
-        );
+        });
 
-        // If updatedOrder comes back null, it was concurrently changed somewhere else. Skip it safely.
-        if (!updatedOrder) {
-          logger.warn(
-            `CRON COLLISION PREVENTED: Order ${order.paymentReference} was updated concurrently.`,
-          );
-          continue;
-        }
-
-        // Return the allocated ticket tier allocation back to the Event document
-        await Event.updateOne(
-          {
-            _id: order.event,
-            "ticketTiers.name": order.tierName,
-          },
-          {
-            $inc: {
-              "ticketTiers.$[tier].sold": -order.quantity,
-              attendees: -order.quantity,
+        // Prepare inventory recovery updates for events
+        eventBulkOps.push({
+          updateOne: {
+            filter: { _id: order.event, "ticketTiers.name": order.tierName },
+            update: {
+              $inc: {
+                "ticketTiers.$[tier].sold": -order.quantity,
+                attendees: -order.quantity,
+              },
             },
-          },
-          {
             arrayFilters: [{ "tier.name": order.tierName }],
-            session,
           },
-        );
+        });
+      }
 
+      // Execute Order updates atomically inside the transaction
+      if (orderBulkOps.length > 0) {
+        const orderResult = await Order.bulkWrite(orderBulkOps, { session });
         logger.info(
-          `CRON: Successfully released ${order.quantity} tickets for Event: ${order.event}`,
+          `CRON: Bulk updated ${orderResult.modifiedCount} orders to EXPIRED.`,
+        );
+      }
+
+      // Execute Event updates atomically inside the transaction
+      if (eventBulkOps.length > 0) {
+        await Event.bulkWrite(eventBulkOps, { session });
+        logger.info(
+          "CRON: Bulk released ticket tier capacities back to events.",
         );
       }
 
@@ -137,6 +132,65 @@ export const initInventoryCron = () => {
       logger.error(`CRON TRANSACTION ERROR: ${error.message}`);
     } finally {
       await session.endSession();
+    }
+  });
+};
+
+export const initVibeDecayCron = () => {
+  // Runs every 10 minutes to cool down quiet venues
+  cron.schedule("*/10 * * * *", async () => {
+    logger.info("CRON: Checking for expired hotspot vibes to cool down...");
+
+    try {
+      const now = new Date();
+
+      // 1. Target hotspots that are past their decay window and aren't already set to UNKNOWN/CHILL
+      const expiredHotspots = await Hotspot.find({
+        decayAt: { $lte: now },
+        "vibeCheck.currentVibe": { $nin: ["UNKNOWN", "CHILL"] },
+      });
+
+      if (expiredHotspots.length === 0) {
+        return;
+      }
+
+      logger.info(
+        `CRON: Decaying real-time vibe for ${expiredHotspots.length} hotspots.`,
+      );
+
+      for (const hotspot of expiredHotspots) {
+        // 2. Synchronize the summary object with MongoDB's background array cleanup
+        hotspot.vibeCheck.currentVibe = "CHILL";
+        hotspot.vibeCheck.totalVotes = 0;
+        hotspot.vibeCheck.counts = { lit: 0, lively: 0, chill: 0, dull: 0 };
+        hotspot.vibeCheck.lastUpdated = now;
+
+        // Reset the decay window forward to prevent re-matching on the next run
+        hotspot.decayAt = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+
+        // Save changes cleanly
+        await hotspot.save();
+
+        // 3. Serialize document to recalculate virtual metrics dynamically
+        const hotspotData = hotspot.toObject({ virtuals: true });
+
+        // 4. BROADCAST TO REAL-TIME CLIENTS
+        getIO().to(`hotspot:${hotspot._id}`).emit("hotspot-vibe-updated", {
+          hotspotId: hotspot._id,
+          vibeCheck: hotspotData.vibeCheck,
+          energyScore: hotspotData.energyScore,
+          vibeScore: hotspotData.vibeScore,
+          heatIntensity: hotspotData.heatIntensity,
+          vibeFreshness: hotspotData.vibeFreshness,
+          computedAuraRadius: hotspotData.computedAuraRadius,
+        });
+
+        logger.info(
+          `CRON: Hotspot [${hotspot.title}] has cooled down. Broadcast dispatched.`,
+        );
+      }
+    } catch (error: any) {
+      logger.error(`CRON VIBE DECAY ERROR: ${error.message}`);
     }
   });
 };
