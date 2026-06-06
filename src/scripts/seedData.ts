@@ -130,6 +130,20 @@ async function seedDatabase() {
     if (!uri) throw new Error("Database connection string missing in .env");
 
     await mongoose.connect(uri);
+    console.log("🛡️ Ensuring database integrity...");
+
+    // Get list of indexes
+    const indexes = await Hotspot.collection.listIndexes().toArray();
+    const hasTTLIndex = indexes.some(
+      (idx) => idx.name === "vibeCheck.votes.createdAt_1",
+    );
+
+    if (hasTTLIndex) {
+      await Hotspot.collection.dropIndex("vibeCheck.votes.createdAt_1");
+      console.log("✅ Successfully dropped legacy TTL index.");
+    } else {
+      console.log("ℹ️ No legacy TTL index found. Proceeding safely.");
+    }
     console.log("📡 Connected to database instance.");
 
     console.log("🧹 Cleaning transient ephemeral database collections...");
@@ -149,6 +163,7 @@ async function seedDatabase() {
         name: "Skaute Admin",
         email: "admin@gmail.com",
         password: hashedPassword,
+        interests: ["music"],
         role: "admin",
         image: faker.image.avatar(),
       },

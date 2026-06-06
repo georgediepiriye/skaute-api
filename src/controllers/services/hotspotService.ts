@@ -85,83 +85,59 @@ export const castVibe = async (
   vibeStr: "LIT" | "LIVELY" | "CHILL" | "DULL",
 ) => {
   const hotspot = await Hotspot.findById(hotspotId);
+  if (!hotspot) throw new Error("Hotspot not found");
 
-  if (!hotspot) {
-    throw new Error("Hotspot not found");
+  // 1. Calculate Time Relevance Weight
+  const hour = new Date().getHours();
+  let timeWeight = 1.0;
+
+  if (hotspot.category === "nightlife" && (hour < 18 || hour > 5)) {
+    timeWeight = 0.2;
+  } else if (hotspot.category === "localeats" && (hour < 8 || hour > 21)) {
+    timeWeight = 0.2;
   }
 
-  // 1. Safe Filter: Remove user's previous vote (handling potential ObjectId conversion safely)
+  // 2. Add vote with weight (Replace previous vote by this user)
   const incomingUserIdStr = userId.toString();
   const remainingVotes = hotspot.vibeCheck.votes.filter(
-    (v) => v.userId && v.userId.toString() !== incomingUserIdStr,
+    (v: any) => v.userId && v.userId.toString() !== incomingUserIdStr,
   );
 
-  // 2. Re-assign and add latest vote
   hotspot.vibeCheck.votes = remainingVotes as any;
   hotspot.vibeCheck.votes.push({
     userId: incomingUserIdStr,
     vibe: vibeStr,
     createdAt: new Date(),
+    weight: timeWeight,
   });
 
-  // 3. Count votes cleanly
-  const voteCounts = { LIT: 0, LIVELY: 0, CHILL: 0, DULL: 0 };
+  // 3. IMMEDIATE RECOUNT (No threshold required)
+  const counts = { lit: 0, lively: 0, chill: 0, dull: 0 };
 
-  hotspot.vibeCheck.votes.forEach((vote) => {
-    if (voteCounts[vote.vibe] !== undefined) {
-      voteCounts[vote.vibe]++;
-    }
+  hotspot.vibeCheck.votes.forEach((v: any) => {
+    const w = v.weight || 1;
+    if (v.vibe === "LIT") counts.lit += w;
+    if (v.vibe === "LIVELY") counts.lively += w;
+    if (v.vibe === "CHILL") counts.chill += w;
+    if (v.vibe === "DULL") counts.dull += w;
   });
 
-  hotspot.vibeCheck.counts = {
-    lit: voteCounts.LIT,
-    lively: voteCounts.LIVELY,
-    chill: voteCounts.CHILL,
-    dull: voteCounts.DULL,
-  };
+  hotspot.vibeCheck.counts = counts;
+
+  // Set Top Vibe based on weighted counts (Updates on every vote)
+  const entries = Object.entries(counts) as [string, number][];
+  const top = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
+  hotspot.vibeCheck.currentVibe = top[0].toUpperCase() as any;
 
   hotspot.vibeCheck.totalVotes = hotspot.vibeCheck.votes.length;
+  hotspot.lastVibeActivityAt = new Date();
 
-  // 4. Determine current top vibe with a clean priority tie-breaker (LIT > LIVELY > CHILL > DULL)
-  // Using >= ensures that if two vibes are tied, the one appearing later in this array wins
-  // (or change to > if you want earlier keys to win)
-  const vibePriority: ("LIT" | "LIVELY" | "CHILL" | "DULL")[] = [
-    "DULL",
-    "CHILL",
-    "LIVELY",
-    "LIT",
-  ];
-  let topVibe: "LIT" | "LIVELY" | "CHILL" | "DULL" = "CHILL";
-  let maxVotes = 0;
-
-  vibePriority.forEach((vibe) => {
-    const count = voteCounts[vibe];
-    if (count >= maxVotes && count > 0) {
-      maxVotes = count;
-      topVibe = vibe;
-    }
-  });
-
-  hotspot.vibeCheck.currentVibe = topVibe;
-
-  // 5. Update timestamps and decay properties
-  const now = new Date();
-  hotspot.vibeCheck.lastUpdated = now;
-  hotspot.lastVibeActivityAt = now;
-  hotspot.decayAt = new Date(now.getTime() + 6 * 60 * 60 * 1000); // 6 hours lifecycle
-
-  // CRITICAL: Force Mongoose to acknowledge the deep nested array modification
-  hotspot.markModified("vibeCheck.votes");
-  hotspot.markModified("vibeCheck.counts");
-
+  hotspot.markModified("vibeCheck");
   await hotspot.save();
 
-  // 6. Refresh virtuals
-  const hotspotData = hotspot.toObject({
-    virtuals: true,
-  });
+  const hotspotData = hotspot.toObject({ virtuals: true });
 
-  // 7. BROADCAST LIVE UPDATE TO ROOM
+  // 4. BROADCAST UPDATE
   getIO().to(`hotspot:${hotspotId}`).emit("hotspot-vibe-updated", {
     hotspotId,
     vibeCheck: hotspotData.vibeCheck,

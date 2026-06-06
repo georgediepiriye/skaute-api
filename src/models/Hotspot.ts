@@ -21,6 +21,7 @@ interface IVibeVote {
   userId: Types.ObjectId | string;
   vibe: "LIT" | "LIVELY" | "CHILL" | "DULL";
   createdAt?: Date;
+  weight: number;
 }
 
 interface IVibeCheck {
@@ -53,6 +54,7 @@ const vibeVoteSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    weight: { type: Number, default: 1.0 },
   },
   { _id: false },
 );
@@ -331,41 +333,45 @@ hotspotSchema.virtual("energyScore").get(function (this: HotspotDocument) {
   if (freshness === 0) return 0;
 
   const heat = this.heatIntensity || 0;
-
-  // Base blend score configuration
-  let baselineEnergy = (heat * 0.6 + freshness * 0.4) * 100;
-
   const now = new Date();
-  const currentHour = now.getHours();
-  const currentDay = now.getDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
-  const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
+  const hour = now.getHours();
 
-  let timeWindowModifier = 1.0;
+  // 1. Define Category Profiles (Start hour, End hour, Peak intensity)
+  const categoryProfiles: Record<
+    string,
+    { start: number; end: number; peak: number }
+  > = {
+    nightlife: { start: 20, end: 5, peak: 1.2 }, // 8 PM to 5 AM
+    lounge: { start: 16, end: 2, peak: 1.1 }, // 4 PM to 2 AM
+    localeats: { start: 8, end: 20, peak: 1.3 }, // 8 AM to 8 PM
+    dining: { start: 12, end: 23, peak: 1.0 }, // 12 PM to 11 PM
+    workspace: { start: 8, end: 18, peak: 1.0 }, // 8 AM to 6 PM
+    wellness: { start: 6, end: 20, peak: 1.0 }, // 6 AM to 8 PM
+    lifestyle: { start: 9, end: 21, peak: 1.0 }, // 9 AM to 9 PM
+    parks: { start: 7, end: 19, peak: 1.0 }, // 7 AM to 7 PM
+  };
 
-  // 1. Nightlife & Lounges Strategy
-  if (this.category === "nightlife" || this.category === "lounge") {
-    if (currentHour >= 5 && currentHour < 19) {
-      timeWindowModifier = 0.05; // Drop daytime club/lounge false positives directly to zero
-    } else if (!isWeekend && currentHour >= 23) {
-      timeWindowModifier = 0.75; // Adjust expectations dynamically down during weekday midnight windows
-    }
-  }
-  // 2. Co-Working Spaces Strategy
-  else if (this.category === "workspace") {
-    if (currentHour >= 19 || currentHour < 7 || isWeekend) {
-      timeWindowModifier = 0.05; // De-escalate office data spaces completely when doors are locked
-    }
-  }
-  // 3. Joints & Local Eats (Bole / Bukas) Strategy
-  else if (this.category === "localeats") {
-    if (currentHour >= 21 || currentHour < 9) {
-      timeWindowModifier = 0.1; // Extinguish food spot data markers completely at late night periods
-    }
+  const profile = categoryProfiles[this.category] || {
+    start: 0,
+    end: 23,
+    peak: 1.0,
+  };
+
+  // 2. Calculate if we are in the "Active" window
+  let isOpen = false;
+  if (profile.start < profile.end) {
+    isOpen = hour >= profile.start && hour < profile.end;
+  } else {
+    // Handles overnight ranges like 10 PM (22) to 5 AM (5)
+    isOpen = hour >= profile.start || hour < profile.end;
   }
 
-  return Math.round(
-    Math.max(0, Math.min(100, baselineEnergy * timeWindowModifier)),
-  );
+  if (!isOpen) return 10; // Low "ambient" energy if closed, but not invisible (10%)
+
+  // 3. Final Score Calculation
+  // We use the heat (user votes) and boost it if we are in the category's natural peak window
+  const baseline = (heat * 0.7 + freshness * 0.3) * 100;
+  return Math.round(Math.min(100, baseline * profile.peak));
 });
 
 // Controls Map Aura graphic scale properties based on pure dynamic runtime engine scores
