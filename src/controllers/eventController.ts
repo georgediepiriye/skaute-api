@@ -17,6 +17,7 @@ export const createEvent = async (
   res: Response,
   next: NextFunction,
 ) => {
+  console.log("Received event creation request with body:", req.body);
   try {
     // Parse the data sent via FormData
     let eventData =

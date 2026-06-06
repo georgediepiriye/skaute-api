@@ -135,3 +135,35 @@ export const initInventoryCron = () => {
     }
   });
 };
+
+export const initVibeDecayCron = () => {
+  cron.schedule("*/10 * * * *", async () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+    try {
+      // 1. Remove old votes (This is safe, it only touches the array inside)
+      await Hotspot.updateMany(
+        { "vibeCheck.votes.createdAt": { $lt: threeHoursAgo } },
+        { $pull: { "vibeCheck.votes": { createdAt: { $lt: threeHoursAgo } } } },
+      );
+
+      // 2. Reset expired vibes
+      await Hotspot.updateMany(
+        {
+          lastVibeActivityAt: { $lt: threeHoursAgo },
+          "vibeCheck.currentVibe": { $ne: "CHILL" },
+        },
+        {
+          $set: {
+            "vibeCheck.currentVibe": "CHILL",
+            "vibeCheck.totalVotes": 0,
+            "vibeCheck.counts": { lit: 0, lively: 0, chill: 0, dull: 0 },
+          },
+        },
+      );
+      logger.info("CRON: Hotspot sanitation completed.");
+    } catch (err) {
+      logger.error("CRON: Sanitation failed", err);
+    }
+  });
+};

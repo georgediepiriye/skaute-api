@@ -72,7 +72,7 @@ export const getAllHotspots = async (query: any) => {
 
 export const getHotspotById = async (id: string) => {
   // Finds hotspot and chains populate to pull future tickets/moves linked to this venue space
-  return await Hotspot.findById(id).populate("upcomingMoves");
+  return await Hotspot.findById(id);
 };
 
 export const createHotspot = async (data: any) => {

@@ -1,8 +1,4 @@
-import mongoose, {
-  HydratedDocument,
-  Types,
-  CallbackWithoutResultAndOptionalError,
-} from "mongoose";
+import mongoose, { HydratedDocument, Types } from "mongoose";
 
 // Mapped precisely to match your upgraded Nigerian social context categories
 const hotspotCategorySlugs = [
@@ -40,6 +36,7 @@ interface IVibeCheck {
   lastUpdated: Date;
 }
 
+// 🛡️ FIXED: Removed 'expires' to shield the parent hotspot document from complete DB drops
 const vibeVoteSchema = new mongoose.Schema(
   {
     userId: {
@@ -55,7 +52,6 @@ const vibeVoteSchema = new mongoose.Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      expires: 10800, // Reduced to 3 hours (10800s) to enforce localized system truthfulness
     },
   },
   { _id: false },
@@ -277,41 +273,9 @@ hotspotSchema.index({
 });
 
 /**
- * =========================
- * AUTOMATED PRE-FETCH SANITIZER HOOK
- * =========================
- */
-
-hotspotSchema.pre<mongoose.Query<any, any>>(/^find/, async function () {
-  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
-
-  try {
-    // Awaiting the DB update ensures Mongoose naturally moves to the query execution once resolved
-    await this.model.updateMany(
-      {
-        _id: this.getQuery()._id,
-        $or: [
-          { lastVibeActivityAt: { $lt: threeHoursAgo } },
-          { "vibeCheck.totalVotes": 0 },
-        ],
-      },
-      {
-        $set: {
-          "vibeCheck.currentVibe": "CHILL",
-          "vibeCheck.totalVotes": 0,
-          "vibeCheck.counts": { lit: 0, lively: 0, chill: 0, dull: 0 },
-        },
-      },
-    );
-  } catch (err: any) {
-    console.error("⚠️ Sanitizer step skipped:", err);
-  }
-});
-
-/**
- * =========================
+ * ==========================================
  * VIRTUALS (With Context-Aware Decay Logic)
- * =========================
+ * ==========================================
  */
 hotspotSchema.virtual("allPhotos").get(function (this: HotspotDocument) {
   return [this.image, ...(this.gallery || [])];
