@@ -202,6 +202,7 @@ export const SCAN_LOG_STATUS = {
   DUPLICATE: "duplicate",
   INVALID_EVENT: "invalid_event",
   REVOKED_TICKET: "revoked_ticket",
+  SUCCESS_MANUAL_OVERRIDE: "success_manual_override",
 } as const;
 
 export type skauteType = keyof typeof EVENT_TYPES;

@@ -219,3 +219,75 @@ export const refundTicket = async (
     next(error);
   }
 };
+
+export const manualCheckIn = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { ticketCode } = req.params as { ticketCode: string };
+    const staffId = (req.user as any)._id;
+
+    const result = await ticketService.processManualCheckIn(
+      ticketCode,
+      staffId,
+    );
+
+    res.status(httpStatus.OK).json({ status: "success", data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendTicket = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { ticketCode } = req.params as { ticketCode: string };
+    await ticketService.processResendTicket(ticketCode);
+
+    res
+      .status(httpStatus.OK)
+      .json({ status: "success", message: "Ticket re-sent successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const transferTicket = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { ticketCode } = req.params;
+    const { firstName, lastName, email } = req.body;
+
+    if (!firstName || !lastName || !email) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "New buyer details are required",
+      );
+    }
+
+    const updatedTicket = await ticketService.processTicketTransfer(
+      ticketCode as string,
+      {
+        firstName,
+        lastName,
+        email,
+      },
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Ticket transferred successfully",
+      data: updatedTicket,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

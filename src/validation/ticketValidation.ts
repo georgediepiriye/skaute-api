@@ -38,9 +38,23 @@ export const refundTicketSchema = z.object({
   }),
 });
 
+export const transferTicketSchema = z.object({
+  params: z.object({
+    ticketCode: z.string().min(5, "Invalid ticket code"),
+  }),
+  body: z.object({
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+    email: z.string().email("Invalid email address"),
+  }),
+});
+
+export type TransferTicketParams = z.infer<
+  typeof transferTicketSchema
+>["params"];
+export type TransferTicketInput = z.infer<typeof transferTicketSchema>["body"];
 export type SyncTicketsParams = z.infer<typeof syncTicketsSchema>["params"];
 export type SyncTicketsQuery = z.infer<typeof syncTicketsSchema>["query"];
-
 export type BookTicketInput = z.infer<typeof bookTicketSchema>["body"];
 export type ValidateCheckInInput = z.infer<
   typeof validateCheckInSchema

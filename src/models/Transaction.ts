@@ -4,7 +4,7 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface ITransaction extends Document {
   user: mongoose.Types.ObjectId;
   event?: mongoose.Types.ObjectId;
-  type: "ticket_sale" | "gate_sale" | "refund" | "payout";
+  type: "ticket_sale" | "gate_sale" | "refund" | "payout" | "ticket_transfer";
   amount: number;
   fee: number; // Skaute's 5.5% commission
   netAmount: number; // For gate sales, this will be calculated as a negative debt (-fee)
@@ -19,7 +19,7 @@ const transactionSchema = new Schema<ITransaction>(
     event: { type: Schema.Types.ObjectId, ref: "Event" },
     type: {
       type: String,
-      enum: ["ticket_sale", "gate_sale", "refund", "payout"],
+      enum: ["ticket_sale", "gate_sale", "refund", "payout", "ticket_transfer"],
       required: true,
     },
     amount: { type: Number, required: true },

@@ -39,7 +39,7 @@ const handleOrderFulfilled = async ({
   order,
   tickets,
   eventImage,
-  isManualPlacement = false, // Default to false for regular checkouts
+  isManualPlacement = false,
 }: {
   order: any;
   tickets: any[];
@@ -57,7 +57,6 @@ const handleOrderFulfilled = async ({
       );
     }
 
-    // Both streams share the exact same asset delivery utility safely
     await sendTicketEmail(order.buyerEmail, tickets, eventImage);
 
     logger.info(
@@ -163,6 +162,31 @@ const handleEventCancelled = async ({
 };
 
 /**
+ * Handle Ticket Resend Request
+ */
+const handleTicketResent = async ({
+  ticket,
+  order,
+}: {
+  ticket: any;
+  order: any;
+}) => {
+  try {
+    logger.info(
+      `Background: Re-dispatching ticket ${ticket.ticketCode} to ${order.buyerEmail}`,
+    );
+
+    await sendTicketEmail(order.buyerEmail, [ticket], ticket.event?.image);
+
+    logger.info(`Background: Ticket resend delivered to ${order.buyerEmail}`);
+  } catch (error: any) {
+    logger.error(
+      `Background Error: Failed to execute ticket resend: ${error.message}`,
+    );
+  }
+};
+
+/**
  * PREVENT MEMORY LEAKS
  * removeAllListeners ensures we don't duplicate listeners during hot-reloads
  */
@@ -171,12 +195,15 @@ skauteEvents.removeAllListeners("ticket.refunded");
 skauteEvents.removeAllListeners("user.signup");
 skauteEvents.removeAllListeners("event.moderated");
 skauteEvents.removeAllListeners("event.cancelled");
+skauteEvents.removeAllListeners("ticket.resend");
+
 // Register the listeners
 skauteEvents.on("order.fulfilled", handleOrderFulfilled);
 skauteEvents.on("ticket.refunded", handleTicketRefunded);
 skauteEvents.on("user.signup", handleUserSignup);
 skauteEvents.on("event.moderated", handleEventModerated);
 skauteEvents.on("event.cancelled", handleEventCancelled);
+skauteEvents.on("ticket.resend", handleTicketResent);
 skauteEvents.setMaxListeners(20);
 
 export default skauteEvents;

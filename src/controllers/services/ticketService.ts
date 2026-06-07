@@ -788,9 +788,9 @@ export const processTicketRefund = async (ticketCode: string) => {
     await Transaction.create(
       [
         {
-          user: order.user ? order.user.toString() : null, // Handle logged-in users vs guests
+          user: order.user ? order.user.toString() : null,
           event: ticket.event.toString(),
-          type: "refund", // 💡 FIXED: Matches the exact "refund" string configuration expected by the transaction schema enum validator
+          type: "refund", // 💡
           amount: -grossRefundAmount, // Negative deduction from overall ticket sales
           fee: -platformFeeReversal, // Negative deduction from platform profit metrics
           netAmount: -netAmountReversal, // Negative deduction from what organizer is owed
@@ -813,6 +813,108 @@ export const processTicketRefund = async (ticketCode: string) => {
 
     // 5. Async Notification
     skauteEvents.emit("ticket.refunded", { ticket, order });
+
+    return ticket;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+};
+
+export const processManualCheckIn = async (
+  ticketCode: string,
+  staffId: string,
+) => {
+  const ticket = await Ticket.findOne({ ticketCode });
+  if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
+
+  if (ticket.status !== TICKET_STATUS.valid) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      `Cannot check in ticket with status: ${ticket.status}`,
+    );
+  }
+
+  ticket.status = TICKET_STATUS.used;
+  ticket.checkedInAt = new Date();
+  ticket.checkedInBy = staffId;
+  await ticket.save();
+
+  await ScanLog.create({
+    event: ticket.event,
+    ticket: ticket._id,
+    scanner: staffId,
+    status: SCAN_LOG_STATUS.SUCCESS_MANUAL_OVERRIDE,
+  });
+
+  return ticket;
+};
+
+export const processResendTicket = async (ticketCode: string) => {
+  const ticket = await Ticket.findOne({ ticketCode }).populate("order");
+  if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
+
+  skauteEvents.emit("ticket.resend", { ticket, order: ticket.order });
+
+  return { success: true };
+};
+
+export const processTicketTransfer = async (
+  ticketCode: string,
+  newBuyerData: { firstName: string; lastName: string; email: string },
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const ticket = await Ticket.findOne({ ticketCode })
+      .populate("order")
+      .session(session);
+
+    if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
+    if (ticket.status !== TICKET_STATUS.valid) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Only valid tickets can be transferred",
+      );
+    }
+
+    const oldBuyerEmail = ticket.buyerInfo.email;
+
+    // 1. Update Buyer Information
+    ticket.buyerInfo = newBuyerData;
+    ticket.status = TICKET_STATUS.transferred;
+    await ticket.save({ session });
+
+    // 2. Log as a $0 Transaction (The "Digital Paper Trail")
+    await Transaction.create(
+      [
+        {
+          user: ticket.order?.user || null,
+          event: ticket.event.toString(),
+          type: "ticket_transfer",
+          amount: 0, // No money moved
+          fee: 0,
+          netAmount: 0,
+          status: "success",
+          reference: `TRANSFER-${ticketCode}-${Date.now()}`,
+          metadata: {
+            ticketCode,
+            fromEmail: oldBuyerEmail,
+            toEmail: newBuyerData.email,
+            reason: "Organizer Initiated Transfer",
+          },
+        },
+      ],
+      { session },
+    );
+
+    await session.commitTransaction();
+
+    // 3. Optional: Emit event if you want to notify the new owner
+    skauteEvents.emit("ticket.transferred", { ticket, oldBuyerEmail });
 
     return ticket;
   } catch (error) {
