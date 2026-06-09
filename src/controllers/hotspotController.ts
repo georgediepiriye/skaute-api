@@ -10,6 +10,25 @@ cloudinary.config({
   api_secret: config.cloudinary.apiSecret,
 });
 
+const uploadHotspotImage = async (
+  file: Express.Multer.File,
+  folder: string,
+) => {
+  const uploadResult = await new Promise<any>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      },
+    );
+
+    stream.end(file.buffer);
+  });
+
+  return uploadResult.secure_url;
+};
+
 export const getAllHotspots = async (
   req: Request,
   res: Response,
@@ -55,6 +74,7 @@ export const createHotspot = async (
   next: NextFunction,
 ) => {
   try {
+    console.log("Received hotspot creation request with body:", req.body);
     const files = req.files as {
       image?: Express.Multer.File[];
       gallery?: Express.Multer.File[];
@@ -73,23 +93,7 @@ export const createHotspot = async (
     let imageUrl = "";
 
     if (files?.image?.[0]) {
-      const uploadResult = await new Promise<any>((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            upload_preset: "skaute_hotspots",
-            unsigned: true,
-            folder: "skaute/hotspots",
-          },
-          (error, result) => {
-            if (error) return reject(error);
-            resolve(result);
-          },
-        );
-
-        stream.end(files.image![0].buffer);
-      });
-
-      imageUrl = uploadResult.secure_url;
+      imageUrl = await uploadHotspotImage(files.image[0], "skaute/hotspots");
     }
 
     // ==========================
@@ -100,23 +104,11 @@ export const createHotspot = async (
 
     if (files?.gallery?.length) {
       for (const image of files.gallery) {
-        const uploadResult = await new Promise<any>((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            {
-              upload_preset: "skaute_hotspots",
-              unsigned: true,
-              folder: "skaute/hotspots/gallery",
-            },
-            (error, result) => {
-              if (error) return reject(error);
-              resolve(result);
-            },
-          );
-
-          stream.end(image.buffer);
-        });
-
-        galleryUrls.push(uploadResult.secure_url);
+        const imageUrl = await uploadHotspotImage(
+          image,
+          "skaute/hotspots/gallery",
+        );
+        galleryUrls.push(imageUrl);
       }
     }
 
@@ -142,10 +134,6 @@ export const createHotspot = async (
     delete hotspotData.imageFile;
     delete hotspotData.galleryFiles;
 
-    // ==========================
-    // SAVE
-    // ==========================
-
     const newHotspot = await hotspotService.createHotspot(hotspotData);
 
     res.status(httpStatus.CREATED).json({
@@ -154,6 +142,82 @@ export const createHotspot = async (
         hotspot: newHotspot,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateHotspot = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const files = req.files as {
+      image?: Express.Multer.File[];
+      gallery?: Express.Multer.File[];
+    };
+
+    const updateData =
+      typeof req.body.hotspotData === "string"
+        ? JSON.parse(req.body.hotspotData)
+        : { ...req.body };
+
+    if (files?.image?.[0]) {
+      updateData.image = await uploadHotspotImage(
+        files.image[0],
+        "skaute/hotspots",
+      );
+    }
+
+    if (files?.gallery?.length) {
+      updateData.gallery = [];
+
+      for (const image of files.gallery) {
+        const imageUrl = await uploadHotspotImage(
+          image,
+          "skaute/hotspots/gallery",
+        );
+        updateData.gallery.push(imageUrl);
+      }
+    }
+
+    if (updateData.location) {
+      updateData.location = {
+        type: "Point",
+        ...updateData.location,
+        city: updateData.location.city || "Port Harcourt",
+        state: updateData.location.state || "Rivers State",
+      };
+    }
+
+    delete updateData.imageFile;
+    delete updateData.galleryFiles;
+
+    const updatedHotspot = await hotspotService.updateHotspot(
+      req.params.hotspotId as string,
+      updateData,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: {
+        hotspot: updatedHotspot,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteHotspot = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    await hotspotService.deleteHotspot(req.params.hotspotId as string);
+    res.status(httpStatus.NO_CONTENT).send();
   } catch (error) {
     next(error);
   }

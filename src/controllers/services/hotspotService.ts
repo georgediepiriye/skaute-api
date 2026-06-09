@@ -1,5 +1,7 @@
 import Hotspot from "../../models/Hotspot.js";
 import { getIO } from "../../socket.js";
+import AppError from "../../utils/AppError.js";
+import httpStatus from "http-status";
 
 export const getAllHotspots = async (query: any) => {
   const queryObj = { ...query };
@@ -77,6 +79,27 @@ export const getHotspotById = async (id: string) => {
 
 export const createHotspot = async (data: any) => {
   return await Hotspot.create(data);
+};
+
+export const updateHotspot = async (hotspotId: string, data: any) => {
+  const updatedHotspot = await Hotspot.findByIdAndUpdate(hotspotId, data, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!updatedHotspot) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot not found");
+  }
+
+  return updatedHotspot;
+};
+
+export const deleteHotspot = async (hotspotId: string) => {
+  const deletedHotspot = await Hotspot.findByIdAndDelete(hotspotId);
+
+  if (!deletedHotspot) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot not found");
+  }
 };
 
 export const castVibe = async (

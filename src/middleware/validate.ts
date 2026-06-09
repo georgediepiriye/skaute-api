@@ -6,10 +6,15 @@ import AppError from "../utils/AppError.js";
 export const validate =
   (schema: z.ZodObject<any>) =>
   async (req: Request, res: Response, next: NextFunction) => {
-    if (req.body && typeof req.body.eventData === "string") {
-      req.body = JSON.parse(req.body.eventData);
-    }
     try {
+      const payloadKey = ["eventData", "hotspotData"].find(
+        (key) => req.body && typeof req.body[key] === "string",
+      );
+
+      if (payloadKey) {
+        req.body = JSON.parse(req.body[payloadKey]);
+      }
+
       await schema.parseAsync({
         body: req.body,
         query: req.query,

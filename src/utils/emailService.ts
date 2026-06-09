@@ -4,63 +4,129 @@ import logger from "../utils/logger.js";
 
 const resend = new Resend(config.resendApiKey);
 
-// BRAND CONSTANTS: UPDATED
-const SKAUTE_CORAL = "#FF6B35";
-const SKAUTE_NAVY = "#0F172A";
-const SKAUTE_CREAM = "#FFF8F0";
+const MIDNIGHT_NAVY = "#0F172A";
+const CORAL_ORANGE = "#FF6B35";
+const CREAM = "#FFF8F0";
+const SLATE = "#475569";
+const WHITE = "#FFFFFF";
+const BORDER = "#E2E8F0";
+const MUTED = "#94A3B8";
 
+const DISCOVER_URL = "https://skaute.com/discover";
 const LOGO_PUBLIC_URL =
-  "https://res.cloudinary.com/dzhfiblg7/image/upload/f_auto,q_auto,w_800/v1778054500/kivo_events/inhouse/skaute.jpg";
+  "https://res.cloudinary.com/dzhfiblg7/image/upload/v1781035822/skaute_events/logo_main_lvj0fr.webp";
 
-/**
- * Centered Brand Header Component
- */
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const formatCurrency = (value: unknown) => {
+  const amount = Number(value) || 0;
+  return `₦${amount.toLocaleString("en-NG")}`;
+};
+
+const buttonHtml = (label: string, href: string) => `
+  <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin: 28px 0 0 0;">
+    <tr>
+      <td>
+        <a href="${href}" style="background-color: ${CORAL_ORANGE}; border-radius: 12px; color: ${WHITE}; display: inline-block; font-family: Arial, sans-serif; font-size: 14px; font-weight: 800; line-height: 1; padding: 15px 22px; text-decoration: none;">
+          ${escapeHtml(label)}
+        </a>
+      </td>
+    </tr>
+  </table>
+`;
+
 const emailHeaderHtml = `
-  <div style="text-align: center; padding: 32px 0 20px 0; background-color: ${SKAUTE_NAVY};">
-    <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+  <div style="background-color: ${MIDNIGHT_NAVY}; padding: 30px 28px;">
+    <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
       <tr>
         <td style="vertical-align: middle;">
-          <div style="background-color: #ffffff; width: 56px; height: 56px; border-radius: 50%; overflow: hidden; display: inline-block;">
-            <img src="${LOGO_PUBLIC_URL}" alt="Skaute Icon" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
-          </div>
-        </td>
-        <td style="vertical-align: middle; padding-left: 10px;">
-          <span style="font-family: sans-serif; font-size: 26px; font-weight: 900; color: #FFFFFF; letter-spacing: -1px; text-transform: uppercase; line-height: 56px; display: inline-block;">
-            skaute
-          </span>
+          <table border="0" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td style="vertical-align: middle;">
+                <div style="background-color: ${WHITE}; border-radius: 14px; height: 48px; overflow: hidden; width: 48px;">
+                  <img src="${LOGO_PUBLIC_URL}" alt="Skaute" style="border: 0; display: block; height: 48px; object-fit: cover; width: 48px;" />
+                </div>
+              </td>
+              <td style="padding-left: 12px; vertical-align: middle;">
+                <div style="color: ${WHITE}; font-family: Arial, sans-serif; font-size: 24px; font-weight: 900; letter-spacing: 0; line-height: 1;">
+                  Skaute
+                </div>
+                <div style="color: ${CREAM}; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; margin-top: 5px;">
+                  Discover trusted social experiences.
+                </div>
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>
     </table>
   </div>
 `;
 
+const emailShell = (content: string) => `
+  <!doctype html>
+  <html>
+    <body style="background-color: ${CREAM}; margin: 0; padding: 0;">
+      <div style="background-color: ${CREAM}; font-family: Arial, sans-serif; padding: 36px 18px;">
+        <div style="background-color: ${WHITE}; border: 1px solid ${BORDER}; border-radius: 18px; margin: 0 auto; max-width: 600px; overflow: hidden;">
+          ${emailHeaderHtml}
+          <div style="padding: 34px 30px;">
+            ${content}
+          </div>
+          <div style="border-top: 1px solid ${BORDER}; color: ${MUTED}; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; padding: 22px 30px;">
+            This email was sent by Skaute. If you need help, reply to this message and our team will assist.
+          </div>
+        </div>
+      </div>
+    </body>
+  </html>
+`;
+
+const eyebrowHtml = (label: string) => `
+  <p style="color: ${CORAL_ORANGE}; font-family: Arial, sans-serif; font-size: 12px; font-weight: 900; letter-spacing: 0; line-height: 1.4; margin: 0 0 10px 0; text-transform: uppercase;">
+    ${escapeHtml(label)}
+  </p>
+`;
+
+const headingHtml = (text: string) => `
+  <h1 style="color: ${MIDNIGHT_NAVY}; font-family: Arial, sans-serif; font-size: 28px; font-weight: 900; letter-spacing: 0; line-height: 1.2; margin: 0 0 16px 0;">
+    ${escapeHtml(text)}
+  </h1>
+`;
+
+const paragraphHtml = (text: string) => `
+  <p style="color: ${SLATE}; font-family: Arial, sans-serif; font-size: 15px; line-height: 1.7; margin: 0 0 18px 0;">
+    ${escapeHtml(text)}
+  </p>
+`;
+
 export const sendWelcomeEmail = async (to: string, name: string) => {
+  const firstName = name || "there";
+
   try {
     const { data, error } = await resend.emails.send({
       from: "Skaute <hello@skaute.com>",
-      to: to,
-      subject: "⚡ Welcome to Skaute — The Movement Starts Here",
-      html: `
-        <div style="font-family: sans-serif; background-color: ${SKAUTE_CREAM}; padding: 40px 20px; margin: 0;">
-          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; overflow: hidden; border: 1px solid #f1f5f9; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05);">
-            ${emailHeaderHtml}
-            <div style="padding: 32px;">
-              <h1 style="font-size: 24px; color: ${SKAUTE_NAVY}; font-weight: 900; margin: 0 0 16px 0; text-transform: uppercase;">
-                WELCOME TO THE CLIQUE, ${name.toUpperCase()}.
-              </h1>
-              <p style="color: #475569; font-size: 14px; line-height: 1.6; margin: 0 0 32px 0;">
-                Your account is locked in. Skaute is built to get you out of the house and directly into the best curated social moves, club mixers, and rave events happening live across Port Harcourt.
-              </p>
-              <div style="text-align: center;">
-                <a href="https://skaute.onrender.com/discover" style="background-color: ${SKAUTE_CORAL}; color: #ffffff; font-weight: bold; text-decoration: none; text-transform: uppercase; padding: 16px 32px; border-radius: 16px; display: inline-block;">
-                  Discover Live Events
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      `,
+      to,
+      subject: "Welcome to Skaute",
+      html: emailShell(`
+        ${eyebrowHtml("Account created")}
+        ${headingHtml(`Welcome to Skaute, ${firstName}.`)}
+        ${paragraphHtml(
+          "Your account is ready. Skaute helps you discover credible events, hotspots, and social experiences worth showing up for.",
+        )}
+        ${paragraphHtml(
+          "Start with the discovery feed to find what is live, nearby, and relevant to your kind of outing.",
+        )}
+        ${buttonHtml("Explore Skaute", DISCOVER_URL)}
+      `),
     });
+
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {
@@ -77,32 +143,60 @@ export const sendTicketEmail = async (
 ) => {
   try {
     const ticketListHtml = tickets
-      .map(
-        (ticket) => `
-      <div style="margin-bottom: 24px; border: 2px solid ${SKAUTE_NAVY}; border-radius: 20px; padding: 20px;">
-        <h3 style="margin: 0; color: ${SKAUTE_NAVY};">${ticket.tierName}</h3>
-        <p style="font-family: monospace; color: ${SKAUTE_CORAL};">${ticket.checkInCode}</p>
-      </div>
-    `,
-      )
+      .map((ticket) => {
+        const tierName = escapeHtml(ticket.tierName || "Access Pass");
+        const checkInCode = escapeHtml(
+          ticket.checkInCode || ticket.ticketCode || "Pending",
+        );
+        const ticketCode = escapeHtml(ticket.ticketCode);
+
+        return `
+          <div style="border: 1px solid ${BORDER}; border-radius: 14px; margin: 0 0 14px 0; padding: 18px;">
+            <p style="color: ${MIDNIGHT_NAVY}; font-family: Arial, sans-serif; font-size: 16px; font-weight: 900; line-height: 1.4; margin: 0 0 8px 0;">
+              ${tierName}
+            </p>
+            <p style="color: ${SLATE}; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; margin: 0 0 10px 0;">
+              Present this code at check-in.
+            </p>
+            <div style="background-color: ${CREAM}; border-left: 4px solid ${CORAL_ORANGE}; border-radius: 10px; color: ${MIDNIGHT_NAVY}; font-family: 'Courier New', monospace; font-size: 20px; font-weight: 800; letter-spacing: 0; padding: 14px;">
+              ${checkInCode}
+            </div>
+            ${
+              ticketCode
+                ? `<p style="color: ${MUTED}; font-family: Arial, sans-serif; font-size: 11px; line-height: 1.5; margin: 10px 0 0 0;">Ticket ID: ${ticketCode}</p>`
+                : ""
+            }
+          </div>
+        `;
+      })
       .join("");
+
+    const imageHtml = eventImage
+      ? `<img src="${escapeHtml(eventImage)}" alt="Event" style="border: 0; border-radius: 14px; display: block; margin: 0 0 22px 0; max-height: 260px; object-fit: cover; width: 100%;" />`
+      : "";
 
     const { data, error } = await resend.emails.send({
       from: "Skaute <hello@skaute.com>",
-      to: to,
-      subject: "🎟️ You're In! Your Official Skaute Access Passes",
-      html: `
-        <div style="font-family: sans-serif; background-color: ${SKAUTE_CREAM}; padding: 40px 20px;">
-          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; overflow: hidden;">
-            ${emailHeaderHtml}
-            <div style="padding: 32px;">
-              <h1 style="color: ${SKAUTE_NAVY};">YOUR ADVENTURE AWAITS.</h1>
-              ${ticketListHtml}
-            </div>
-          </div>
-        </div>
-      `,
+      to,
+      subject: isDelayedReconciliation
+        ? "Your Skaute access pass is ready"
+        : "Your Skaute access pass",
+      html: emailShell(`
+        ${imageHtml}
+        ${eyebrowHtml("Access confirmed")}
+        ${headingHtml("Your pass is ready.")}
+        ${paragraphHtml(
+          isDelayedReconciliation
+            ? "Your payment has been reconciled and your access pass is now confirmed."
+            : "Your booking is confirmed. Keep this email handy and present your check-in code at the venue.",
+        )}
+        ${ticketListHtml}
+        ${paragraphHtml(
+          "For a smooth entry, bring a valid ID and use the same name or email attached to your booking where requested.",
+        )}
+      `),
     });
+
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {
@@ -112,45 +206,39 @@ export const sendTicketEmail = async (
 };
 
 export const sendRefundEmail = async (to: string, ticket: any) => {
+  const tierName = ticket.tierName || "your access pass";
+  const ticketCode = escapeHtml(ticket.ticketCode);
+
   try {
     const { data, error } = await resend.emails.send({
       from: "Skaute <hello@skaute.com>",
-      to: to,
-      subject: "💸 Refund Confirmed - Skaute",
-      html: `
-        <div style="font-family: sans-serif; background-color: #F8FAFC; padding: 40px 20px; margin: 0;">
-          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; overflow: hidden; border: 1px solid #E2E8F0; padding: 0 0 40px 0; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);">
-            
-            ${emailHeaderHtml}
-            
-            <div style="padding: 0 32px;">
-              <div style="background-color: rgba(239, 68, 68, 0.1); width: 64px; height: 64px; border-radius: 20px; margin: 24px auto; text-align: center;">
-                <span style="font-size: 28px; line-height: 64px;">💸</span>
-              </div>
-
-              <h1 style="font-family: sans-serif; font-size: 24px; color: ${SKAUTE_NAVY}; font-weight: 900; margin: 0 0 8px 0; text-transform: uppercase;">
-                REFUND DISPATCHED
-              </h1>
-              <p style="color: #64748B; font-size: 14px; margin: 0 0 32px 0;">
-                Your pass for <strong>${ticket.tierName}</strong> has been cancelled.
-              </p>
-
-              <div style="margin: 0 0 32px 0; padding: 24px; background-color: ${SKAUTE_CREAM}; border-radius: 24px; border: 2px dashed ${SKAUTE_CORAL};">
-                <p style="margin: 0; font-size: 10px; color: ${SKAUTE_NAVY}; font-weight: bold; text-transform: uppercase;">TOTAL REVERSED</p>
-                <p style="margin: 6px 0 0 0; font-size: 32px; font-weight: 900; color: ${SKAUTE_CORAL};">₦${ticket.pricePaid.toLocaleString()}</p>
-              </div>
-
-              <div style="text-align: left; background-color: #F8FAFC; border-left: 4px solid ${SKAUTE_CORAL}; padding: 20px; margin-bottom: 32px;">
-                <p style="margin: 0; font-size: 12px; color: ${SKAUTE_NAVY}; font-weight: 900; text-transform: uppercase;">Direct Bank Transfer Notice:</p>
-                <p style="margin: 5px 0 0 0; font-size: 13px; color: #475569;">Your refund has been initiated via Paystack. Please allow 3-5 business days for bank processing.</p>
-              </div>
-
-              <p style="font-size: 11px; color: #94A3B8; text-transform: uppercase;">TICKET ID: ${ticket.ticketCode}</p>
-            </div>
-          </div>
+      to,
+      subject: "Refund confirmation from Skaute",
+      html: emailShell(`
+        ${eyebrowHtml("Refund confirmed")}
+        ${headingHtml("Your refund has been initiated.")}
+        ${paragraphHtml(
+          `The pass for ${tierName} has been cancelled and the refund process has started.`,
+        )}
+        <div style="background-color: ${CREAM}; border: 1px solid ${BORDER}; border-radius: 14px; margin: 24px 0; padding: 20px;">
+          <p style="color: ${SLATE}; font-family: Arial, sans-serif; font-size: 12px; font-weight: 800; line-height: 1.4; margin: 0 0 8px 0; text-transform: uppercase;">
+            Amount reversed
+          </p>
+          <p style="color: ${CORAL_ORANGE}; font-family: Arial, sans-serif; font-size: 30px; font-weight: 900; line-height: 1.2; margin: 0;">
+            ${formatCurrency(ticket.pricePaid)}
+          </p>
         </div>
-      `,
+        ${paragraphHtml(
+          "Refunds are processed through Paystack. Most banks complete the reversal within 3 to 5 business days.",
+        )}
+        ${
+          ticketCode
+            ? `<p style="color: ${MUTED}; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; margin: 22px 0 0 0;">Ticket ID: ${ticketCode}</p>`
+            : ""
+        }
+      `),
     });
+
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {
@@ -167,26 +255,39 @@ export const sendEventModerationEmail = async ({
   reason,
 }: any) => {
   const isApproved = status === "approved";
+  const safeName = organizerName || "there";
+  const safeTitle = eventTitle || "your event";
+  const safeReason = escapeHtml(
+    reason || "Our team needs a few updates before this can go live.",
+  );
+
   try {
     const { data, error } = await resend.emails.send({
       from: "Skaute <hello@skaute.com>",
-      to: to,
-      subject: isApproved ? "🎉 Your Event Is Live" : "⚠️ Event Review Update",
-      html: `
-        <div style="font-family: sans-serif; background-color: ${SKAUTE_CREAM}; padding: 40px 20px;">
-          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; overflow: hidden; padding-bottom: 40px;">
-            ${emailHeaderHtml}
-            <div style="padding: 32px;">
-              <h1 style="color: ${SKAUTE_NAVY}; text-transform: uppercase;">${isApproved ? "EVENT APPROVED" : "REVIEW UPDATE"}</h1>
-              <p>Hello ${organizerName}, your event <strong>${eventTitle}</strong> is ${isApproved ? "live." : "pending changes."}</p>
-              <div style="padding: 20px; background: ${isApproved ? "#F0FDF4" : "#FEF2F2"}; border-radius: 16px;">
-                ${isApproved ? "Your move is now visible on the map!" : reason}
-              </div>
-            </div>
-          </div>
+      to,
+      subject: isApproved
+        ? "Your Skaute event is live"
+        : "Update required for your Skaute event",
+      html: emailShell(`
+        ${eyebrowHtml(isApproved ? "Event approved" : "Review update")}
+        ${headingHtml(isApproved ? "Your event is live." : "Your event needs a few updates.")}
+        ${paragraphHtml(`Hello ${safeName},`)}
+        ${paragraphHtml(
+          isApproved
+            ? `${safeTitle} has passed review and is now visible on Skaute.`
+            : `${safeTitle} has been reviewed, but it needs changes before it can be published.`,
+        )}
+        <div style="background-color: ${isApproved ? "#F0FDF4" : CREAM}; border: 1px solid ${isApproved ? "#BBF7D0" : BORDER}; border-left: 4px solid ${isApproved ? "#16A34A" : CORAL_ORANGE}; border-radius: 14px; color: ${SLATE}; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.7; margin: 24px 0; padding: 18px;">
+          ${
+            isApproved
+              ? "Your event is available for discovery. You can continue managing details from your organizer dashboard."
+              : safeReason
+          }
         </div>
-      `,
+        ${buttonHtml(isApproved ? "View Discover Feed" : "Review Event", DISCOVER_URL)}
+      `),
     });
+
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {
@@ -200,24 +301,27 @@ export const sendCancellationEmail = async (
   buyerName: string,
   eventTitle: string,
 ) => {
+  const safeName = buyerName || "there";
+  const safeTitle = eventTitle || "your event";
+
   try {
     const { data, error } = await resend.emails.send({
       from: "Skaute <hello@skaute.com>",
-      to: to,
-      subject: `⚠️ Update: ${eventTitle} Cancelled`,
-      html: `
-        <div style="font-family: sans-serif; background-color: ${SKAUTE_CREAM}; padding: 40px 20px;">
-          <div style="max-width: 540px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; overflow: hidden;">
-            ${emailHeaderHtml}
-            <div style="padding: 32px;">
-              <h1 style="color: ${SKAUTE_NAVY};">HEY ${buyerName.toUpperCase()}, A MOVE WAS CANCELLED.</h1>
-              <p style="color: #475569;">The organizer has cancelled <strong>${eventTitle}</strong>. Your ticket is now void and the refund process has begun automatically.</p>
-              <a href="https://skaute.onrender.com/discover" style="background-color: ${SKAUTE_CORAL}; color: #ffffff; padding: 16px 32px; border-radius: 16px; text-decoration: none; display: inline-block;">Find Alternative Vibe</a>
-            </div>
-          </div>
-        </div>
-      `,
+      to,
+      subject: `${safeTitle} has been cancelled`,
+      html: emailShell(`
+        ${eyebrowHtml("Event cancelled")}
+        ${headingHtml(`Hello ${safeName},`)}
+        ${paragraphHtml(
+          `${safeTitle} has been cancelled by the organizer. Your ticket is no longer valid for entry.`,
+        )}
+        ${paragraphHtml(
+          "If you paid for this ticket, the refund process has started automatically. Your bank may take 3 to 5 business days to complete the reversal.",
+        )}
+        ${buttonHtml("Find another experience", DISCOVER_URL)}
+      `),
     });
+
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {

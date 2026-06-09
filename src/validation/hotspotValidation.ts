@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+const hotspotCategories = [
+  "nightlife",
+  "lounge",
+  "localeats",
+  "dining",
+  "parks",
+  "lifestyle",
+  "workspace",
+  "wellness",
+  "other",
+  "others",
+] as const;
+
 // Helper for validating MongoDB ObjectIDs
 const objectIdSchema = z
   .string()
@@ -9,21 +22,22 @@ export const createHotspotSchema = z.object({
   body: z.object({
     title: z.string().min(1, "A hotspot must have a title").trim(),
     description: z.string().min(1, "A hotspot must have a description"),
-    category: z.string().min(1, "A hotspot must have a category"),
+    category: z.enum(hotspotCategories),
     status: z
       .enum(["CHILL", "ACTIVE", "TRENDING", "HOT"])
       .optional()
       .default("CHILL"),
-    image: z.string().url("A valid cover image URL is required"),
-    gallery: z
-      .array(z.string().url())
-      .max(5, "Gallery cannot exceed 5 images")
-      .optional()
-      .default([]),
     location: z.object({
       coordinates: z
-        .array(z.number())
-        .length(2, "Coordinates must be exactly [longitude, latitude]"),
+        .tuple([
+          z.number().min(-180).max(180),
+          z.number().min(-90).max(90),
+        ])
+        .or(
+          z
+            .array(z.number())
+            .length(2, "Coordinates must be exactly [longitude, latitude]"),
+        ),
       address: z.string().optional(),
       neighborhood: z.string().optional(),
       city: z.string().optional().default("Port Harcourt"),
@@ -51,7 +65,7 @@ export const createHotspotSchema = z.object({
     activities: z
       .object({
         hasKaraoke: z.boolean().optional().default(false),
-        hasLiveBand: { type: Boolean, default: false },
+        hasLiveBand: z.boolean().optional().default(false),
         hasSnooker: z.boolean().optional().default(false),
         hasPoolside: z.boolean().optional().default(false),
         hasShisha: z.boolean().optional().default(false),
@@ -61,6 +75,41 @@ export const createHotspotSchema = z.object({
       })
       .optional(),
     features: z.array(z.string()).optional().default([]),
+  }),
+});
+
+export const updateHotspotSchema = z.object({
+  params: z.object({
+    hotspotId: objectIdSchema,
+  }),
+  body: createHotspotSchema.shape.body.partial().extend({
+    image: z.string().url("A valid cover image URL is required").optional(),
+    gallery: z
+      .array(z.string().url())
+      .max(5, "Gallery cannot exceed 5 images")
+      .optional(),
+    location: createHotspotSchema.shape.body.shape.location.partial().optional(),
+    contact: createHotspotSchema.shape.body.shape.contact.optional(),
+    activities: createHotspotSchema.shape.body.shape.activities.optional(),
+    analytics: z
+      .object({
+        viewCount: z.number().min(0).optional(),
+        savedCount: z.number().min(0).optional(),
+      })
+      .optional(),
+    bestTimeToVisit: z.string().optional(),
+    claimedBy: objectIdSchema.nullable().optional(),
+    energyLevel: z.number().min(0).optional(),
+    energyRadius: z.number().min(0).optional(),
+    isActive: z.boolean().optional(),
+    isClaimed: z.boolean().optional(),
+    isVerified: z.boolean().optional(),
+  }),
+});
+
+export const deleteHotspotSchema = z.object({
+  params: z.object({
+    hotspotId: objectIdSchema,
   }),
 });
 
@@ -80,6 +129,7 @@ export const getHotspotDetailsSchema = z.object({
 });
 
 export type CreateHotspotInput = z.infer<typeof createHotspotSchema>["body"];
+export type UpdateHotspotInput = z.infer<typeof updateHotspotSchema>["body"];
 export type CastVibeCheckInput = z.infer<typeof castVibeCheckSchema>["body"];
 export type GetHotspotDetailsInput = z.infer<
   typeof getHotspotDetailsSchema

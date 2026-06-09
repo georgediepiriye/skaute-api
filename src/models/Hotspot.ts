@@ -10,6 +10,7 @@ const hotspotCategorySlugs = [
   "lifestyle",
   "workspace",
   "wellness",
+  "others",
 ];
 
 /**

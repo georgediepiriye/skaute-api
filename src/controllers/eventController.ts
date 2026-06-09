@@ -34,6 +34,7 @@ export const createEvent = async (
           {
             upload_preset: "skaute_events",
             unsigned: true,
+            folder: "skaute/events",
           },
           (error, result) => {
             if (error) return reject(error);
