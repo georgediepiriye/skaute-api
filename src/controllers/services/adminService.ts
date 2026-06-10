@@ -1,10 +1,13 @@
 import mongoose from "mongoose";
+import crypto from "node:crypto";
+import httpStatus from "http-status";
 import {
   ORDER_STATUS,
   SCAN_LOG_STATUS,
   TICKET_STATUS,
 } from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
+import Hotspot from "../../models/Hotspot.js";
 import { Order } from "../../models/Order.js";
 import { Payout } from "../../models/Payout.js";
 import { ScanLog } from "../../models/ScanLog.js";
@@ -13,6 +16,7 @@ import { Transaction } from "../../models/Transaction.js";
 import { User } from "../../models/User.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
 import config from "../../config/config.js";
+import AppError from "../../utils/AppError.js";
 
 export const getModerationQueue = async (query: any) => {
   // 1. FILTERING
@@ -77,6 +81,207 @@ export const getModerationQueue = async (query: any) => {
 export const getEventForPreview = async (id: string) => {
   const event = await Event.findById(id).populate("organizer");
   return event;
+};
+
+export const getHotspotsList = async (query: any) => {
+  const queryObj = { ...query };
+  const excludedFields = [
+    "page",
+    "sort",
+    "limit",
+    "fields",
+    "search",
+    "neighborhood",
+  ];
+  excludedFields.forEach((el) => delete queryObj[el]);
+
+  const filter: any = { ...queryObj };
+
+  if (query.search) {
+    filter.$text = { $search: query.search };
+  }
+
+  if (query.neighborhood) {
+    filter["location.neighborhood"] = {
+      $regex: query.neighborhood,
+      $options: "i",
+    };
+  }
+
+  if (query.isActive !== undefined) {
+    filter.isActive = query.isActive === "true";
+  }
+
+  const page = Number(query.page) || 1;
+  const limit = Number(query.limit) || 20;
+  const skip = (page - 1) * limit;
+  const sortBy = query.sort ? query.sort.split(",").join(" ") : "-createdAt";
+
+  const [hotspots, totalHotspots, activeCount, inactiveCount] =
+    await Promise.all([
+      Hotspot.find(filter).sort(sortBy).skip(skip).limit(limit),
+      Hotspot.countDocuments(filter),
+      Hotspot.countDocuments({ isActive: { $ne: false } }),
+      Hotspot.countDocuments({ isActive: false }),
+    ]);
+
+  return {
+    hotspots,
+    pagination: {
+      totalHotspots,
+      totalPages: Math.ceil(totalHotspots / limit),
+      page,
+      limit,
+      counts: {
+        active: activeCount,
+        inactive: inactiveCount,
+        all: activeCount + inactiveCount,
+      },
+    },
+  };
+};
+
+export const processBulkTicketIssue = async (
+  eventId: string,
+  adminId: string,
+  guests: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    tierId: string;
+  }[],
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!adminId) {
+      throw new AppError(
+        httpStatus.UNAUTHORIZED,
+        "Admin authentication context is missing.",
+      );
+    }
+
+    const event = await Event.findById(eventId).session(session);
+    if (!event) {
+      throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+    }
+
+    if (event.isCancelled) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Cannot issue tickets for a cancelled event",
+      );
+    }
+
+    const tiersById = new Map<string, any>();
+    event.ticketTiers.forEach((tier: any) => {
+      if (tier._id) tiersById.set(tier._id.toString(), tier);
+      if (tier.id) tiersById.set(tier.id.toString(), tier);
+    });
+
+    const requestedByTier = new Map<string, number>();
+    guests.forEach((guest) => {
+      requestedByTier.set(
+        guest.tierId,
+        (requestedByTier.get(guest.tierId) || 0) + 1,
+      );
+    });
+
+    for (const [tierId, requestedCount] of requestedByTier.entries()) {
+      const tier = tiersById.get(tierId);
+      if (!tier) {
+        throw new AppError(
+          httpStatus.NOT_FOUND,
+          `Ticket tier not found for tierId ${tierId}`,
+        );
+      }
+
+      const available = Number(tier.capacity || 0) - Number(tier.sold || 0);
+      if (requestedCount > available) {
+        throw new AppError(
+          httpStatus.BAD_REQUEST,
+          `${tier.name} only has ${available} ticket(s) available, but ${requestedCount} guest(s) were submitted.`,
+        );
+      }
+    }
+
+    const createdTickets: any[] = [];
+    const issuedOrders: any[] = [];
+
+    for (const guest of guests) {
+      const tier = tiersById.get(guest.tierId);
+      const checkInCode = `SKT-BULK-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+      const ticketCode = `REF-BULK-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+      const [order] = await Order.create(
+        [
+          {
+            buyerEmail: guest.email.toLowerCase().trim(),
+            event: event._id,
+            tierName: tier.name,
+            quantity: 1,
+            totalAmount: 0,
+            status: ORDER_STATUS.COMPLETED,
+            paymentReference: ticketCode,
+            paymentUrl: "bulk-complimentary",
+            expiresAt: new Date(),
+            paymentMethod: "complimentary",
+            issuedBy: new mongoose.Types.ObjectId(adminId),
+          },
+        ],
+        { session },
+      );
+
+      const [ticket] = await Ticket.create(
+        [
+          {
+            event: event._id,
+            owner: undefined,
+            order: order._id,
+            tierName: tier.name,
+            pricePaid: 0,
+            buyerInfo: {
+              firstName: guest.firstName,
+              lastName: guest.lastName,
+              email: guest.email.toLowerCase().trim(),
+            },
+            ticketCode,
+            checkInCode,
+            status: TICKET_STATUS.valid,
+          },
+        ],
+        { session },
+      );
+
+      tier.sold = Number(tier.sold || 0) + 1;
+      createdTickets.push(ticket);
+      issuedOrders.push(order);
+    }
+
+    event.attendees = Number(event.attendees || 0) + createdTickets.length;
+    event.ticketsSold = Number(event.ticketsSold || 0) + createdTickets.length;
+    await event.save({ session });
+
+    await session.commitTransaction();
+
+    createdTickets.forEach((ticket, index) => {
+      skauteEvents.emit("order.fulfilled", {
+        order: issuedOrders[index],
+        tickets: [ticket],
+        event,
+        eventImage: event.image,
+        isManualPlacement: true,
+      });
+    });
+
+    return createdTickets;
+  } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 };
 
 export const updateApprovalStatus = async (

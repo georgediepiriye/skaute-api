@@ -40,11 +40,15 @@ const handleOrderFulfilled = async ({
   tickets,
   eventImage,
   isManualPlacement = false,
+  isDelayedReconciliation = false,
+  event,
 }: {
   order: any;
   tickets: any[];
   eventImage: string;
   isManualPlacement?: boolean;
+  isDelayedReconciliation?: boolean;
+  event?: any;
 }) => {
   try {
     if (isManualPlacement) {
@@ -57,7 +61,11 @@ const handleOrderFulfilled = async ({
       );
     }
 
-    await sendTicketEmail(order.buyerEmail, tickets, eventImage);
+    await sendTicketEmail(order.buyerEmail, tickets, eventImage, isDelayedReconciliation, {
+      event,
+      order,
+      isManualPlacement,
+    });
 
     logger.info(
       `Background: Ticket delivery email sent successfully to ${order.buyerEmail}`,
@@ -176,7 +184,10 @@ const handleTicketResent = async ({
       `Background: Re-dispatching ticket ${ticket.ticketCode} to ${order.buyerEmail}`,
     );
 
-    await sendTicketEmail(order.buyerEmail, [ticket], ticket.event?.image);
+    await sendTicketEmail(order.buyerEmail, [ticket], ticket.event?.image, false, {
+      event: ticket.event,
+      order,
+    });
 
     logger.info(`Background: Ticket resend delivered to ${order.buyerEmail}`);
   } catch (error: any) {

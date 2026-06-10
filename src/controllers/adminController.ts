@@ -58,6 +58,53 @@ export const getEventPreview = async (
     next(error);
   }
 };
+
+export const getAllHotspots = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { hotspots, pagination } = await adminService.getHotspotsList(
+      req.query,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      results: hotspots.length,
+      pagination,
+      data: { hotspots },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const issueBulkTickets = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId =
+      (req.user as any)?._id?.toString() || (req.user as any)?.id?.toString();
+    const tickets = await adminService.processBulkTicketIssue(
+      req.params.id as string,
+      adminId,
+      req.body.guests,
+    );
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      message: `${tickets.length} ticket(s) issued successfully.`,
+      results: tickets.length,
+      data: { tickets },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const processApproval = async (
   req: Request,
   res: Response,

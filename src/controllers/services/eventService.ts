@@ -1,5 +1,6 @@
 import mongoose, { Types } from "mongoose";
 import { CoOrganizerPermission, Event, IEvent } from "../../models/Event.js";
+import EventView from "../../models/EventView.js";
 import { Ticket } from "../../models/Ticket.js";
 import { User } from "../../models/User.js";
 import AppError from "../../utils/AppError.js";
@@ -396,6 +397,88 @@ export const getAllEvents = async (query: EventFilterQuery) => {
     limit,
     totalPages: Math.ceil(total / limit),
   };
+};
+
+type EventViewContext = {
+  userId?: string;
+  ip?: string;
+  deviceFingerprint?: string;
+  userAgent?: string;
+};
+
+const getLagosDateKey = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  return `${year}-${month}-${day}`;
+};
+
+const buildViewerKey = ({
+  userId,
+  ip,
+  deviceFingerprint,
+  userAgent,
+}: EventViewContext) => {
+  const rawKey = userId
+    ? `user:${userId}`
+    : deviceFingerprint
+      ? `device:${deviceFingerprint}`
+      : `ip:${ip || "unknown"}:${userAgent || "unknown"}`;
+
+  return crypto.createHash("sha256").update(rawKey).digest("hex");
+};
+
+export const recordEventView = async (
+  eventId: string,
+  context: EventViewContext,
+) => {
+  const eventExists = await Event.exists({ _id: eventId });
+
+  if (!eventExists) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
+
+  const viewedOn = getLagosDateKey();
+  const viewerKey = buildViewerKey(context);
+
+  try {
+    await EventView.create({
+      event: eventId,
+      viewerKey,
+      viewedOn,
+      user: context.userId,
+      ip: context.ip,
+      deviceFingerprint: context.deviceFingerprint,
+      userAgent: context.userAgent,
+    });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      const event = await Event.findById(eventId).select("_id views");
+      return { event, counted: false };
+    }
+
+    throw error;
+  }
+
+  const event = await Event.findByIdAndUpdate(
+    eventId,
+    { $inc: { views: 1 } },
+    { new: true, runValidators: true },
+  ).select("_id views");
+
+  if (!event) {
+    throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+  }
+
+  return { event, counted: true };
 };
 
 export const findNearbyEvents = async (
@@ -1529,6 +1612,7 @@ export const issueManualComplimentaryTicket = async (
       skauteEvents.emit("order.fulfilled", {
         order: adminOrder,
         tickets: [newTicket],
+        event,
         eventImage: event.image,
         isManualPlacement: true,
       });

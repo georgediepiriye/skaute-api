@@ -49,8 +49,8 @@ const emailHeaderHtml = `
           <table border="0" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td style="vertical-align: middle;">
-                <div style="background-color: ${WHITE}; border-radius: 14px; height: 48px; overflow: hidden; width: 48px;">
-                  <img src="${LOGO_PUBLIC_URL}" alt="Skaute" style="border: 0; display: block; height: 48px; object-fit: cover; width: 48px;" />
+                <div style="background-color: ${WHITE}; border-radius: 12px; height: 48px; padding: 8px 10px; width: 132px;">
+                  <img src="${LOGO_PUBLIC_URL}" alt="Skaute" width="112" height="32" style="border: 0; display: block; height: 32px; max-width: 112px; object-fit: contain; width: 112px;" />
                 </div>
               </td>
               <td style="padding-left: 12px; vertical-align: middle;">
@@ -106,6 +106,54 @@ const paragraphHtml = (text: string) => `
   </p>
 `;
 
+type TicketEmailContext = {
+  event?: any;
+  order?: any;
+  isManualPlacement?: boolean;
+};
+
+const formatDateTime = (value: unknown) => {
+  if (!value) return "";
+
+  const date = new Date(value as any);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone: "Africa/Lagos",
+  }).format(date);
+};
+
+const getEventFromTicket = (tickets: any[], context?: TicketEmailContext) => {
+  const ticketEvent = tickets.find((ticket) => {
+    return ticket?.event && typeof ticket.event === "object";
+  })?.event;
+
+  return context?.event || ticketEvent;
+};
+
+const detailRowHtml = (label: string, value?: unknown) => {
+  if (value === undefined || value === null || value === "") return "";
+
+  return `
+    <tr>
+      <td style="border-bottom: 1px solid ${BORDER}; color: ${SLATE}; font-family: Arial, sans-serif; font-size: 12px; font-weight: 800; line-height: 1.5; padding: 12px 0; text-transform: uppercase; vertical-align: top; width: 38%;">
+        ${escapeHtml(label)}
+      </td>
+      <td style="border-bottom: 1px solid ${BORDER}; color: ${MIDNIGHT_NAVY}; font-family: Arial, sans-serif; font-size: 14px; font-weight: 700; line-height: 1.5; padding: 12px 0 12px 14px; vertical-align: top;">
+        ${escapeHtml(value)}
+      </td>
+    </tr>
+  `;
+};
+
+const sectionTitleHtml = (title: string) => `
+  <h2 style="color: ${MIDNIGHT_NAVY}; font-family: Arial, sans-serif; font-size: 18px; font-weight: 900; letter-spacing: 0; line-height: 1.3; margin: 30px 0 12px 0;">
+    ${escapeHtml(title)}
+  </h2>
+`;
+
 export const sendWelcomeEmail = async (to: string, name: string) => {
   const firstName = name || "there";
 
@@ -140,24 +188,121 @@ export const sendTicketEmail = async (
   tickets: any[],
   eventImage: string,
   isDelayedReconciliation = false,
+  context: TicketEmailContext = {},
 ) => {
   try {
+    const event = getEventFromTicket(tickets, context);
+    const order = context.order;
+    const eventTitle = event?.title || "Your Skaute event";
+    const eventStart = formatDateTime(event?.startDate);
+    const eventEnd = formatDateTime(event?.endDate);
+    const eventFormat = event?.eventFormat || (event?.isOnline ? "online" : "");
+    const eventLocation = event?.isOnline
+      ? "Online"
+      : [event?.location?.address, event?.location?.neighborhood]
+          .filter(Boolean)
+          .join(", ");
+    const eventCategory = event?.category;
+    const refundPolicy = event?.refundPolicy;
+    const ageRestriction = event?.ageRestriction;
+    const imageSource = eventImage || event?.image;
+    const firstTicket = tickets[0];
+    const buyerName = [
+      firstTicket?.buyerInfo?.firstName,
+      firstTicket?.buyerInfo?.lastName,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const quantity = order?.quantity || tickets.length;
+    const totalAmount =
+      order?.totalAmount !== undefined
+        ? formatCurrency(order.totalAmount)
+        : tickets.length
+          ? formatCurrency(
+              tickets.reduce(
+                (sum, ticket) => sum + Number(ticket.pricePaid || 0),
+                0,
+              ),
+            )
+          : "";
+    const paymentMethod = order?.paymentMethod
+      ? String(order.paymentMethod).toUpperCase()
+      : context.isManualPlacement
+        ? "MANUAL"
+        : "";
+    const paymentReference = order?.paymentReference || "";
+
+    const eventDetailsHtml = `
+      ${sectionTitleHtml("Event details")}
+      <div style="background-color: ${CREAM}; border: 1px solid ${BORDER}; border-radius: 14px; padding: 0 18px;">
+        <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+          ${detailRowHtml("Event", eventTitle)}
+          ${detailRowHtml("Starts", eventStart)}
+          ${detailRowHtml("Ends", eventEnd)}
+          ${detailRowHtml("Format", eventFormat)}
+          ${detailRowHtml("Location", eventLocation)}
+          ${detailRowHtml("Category", eventCategory)}
+          ${detailRowHtml("Age", ageRestriction)}
+          ${detailRowHtml("Refund policy", refundPolicy)}
+        </table>
+      </div>
+    `;
+
+    const orderSummaryHtml = `
+      ${sectionTitleHtml("Order summary")}
+      <div style="border: 1px solid ${BORDER}; border-radius: 14px; padding: 0 18px;">
+        <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%">
+          ${detailRowHtml("Name", buyerName)}
+          ${detailRowHtml("Email", to)}
+          ${detailRowHtml("Quantity", quantity)}
+          ${detailRowHtml("Total paid", totalAmount)}
+          ${detailRowHtml("Payment method", paymentMethod)}
+          ${detailRowHtml("Reference", paymentReference)}
+        </table>
+      </div>
+    `;
+
     const ticketListHtml = tickets
       .map((ticket) => {
+        const rawCheckInCode =
+          ticket.checkInCode || ticket.ticketCode || "Pending";
+        const attendeeName = [
+          ticket.buyerInfo?.firstName,
+          ticket.buyerInfo?.lastName,
+        ]
+          .filter(Boolean)
+          .join(" ");
         const tierName = escapeHtml(ticket.tierName || "Access Pass");
-        const checkInCode = escapeHtml(
-          ticket.checkInCode || ticket.ticketCode || "Pending",
-        );
+        const checkInCode = escapeHtml(rawCheckInCode);
         const ticketCode = escapeHtml(ticket.ticketCode);
+        const pricePaid = formatCurrency(ticket.pricePaid);
+        const status = ticket.status
+          ? String(ticket.status).replace(/_/g, " ").toUpperCase()
+          : "VALID";
+        const qrCodeUrl = escapeHtml(
+          ticket.qrCodeUrl ||
+            ticket.qrCode ||
+            `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(
+              rawCheckInCode,
+            )}`,
+        );
 
         return `
-          <div style="border: 1px solid ${BORDER}; border-radius: 14px; margin: 0 0 14px 0; padding: 18px;">
+          <div style="border: 1px solid ${BORDER}; border-radius: 14px; margin: 0 0 16px 0; padding: 18px;">
             <p style="color: ${MIDNIGHT_NAVY}; font-family: Arial, sans-serif; font-size: 16px; font-weight: 900; line-height: 1.4; margin: 0 0 8px 0;">
               ${tierName}
             </p>
+            <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin: 0 0 14px 0;">
+              ${detailRowHtml("Attendee", attendeeName)}
+              ${detailRowHtml("Ticket price", pricePaid)}
+              ${detailRowHtml("Status", status)}
+            </table>
             <p style="color: ${SLATE}; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; margin: 0 0 10px 0;">
-              Present this code at check-in.
+              Present this QR code at check-in. If scanning is unavailable, the check-in team can use the code below.
             </p>
+            <div style="background-color: ${WHITE}; border: 1px solid ${BORDER}; border-radius: 14px; margin: 14px 0; padding: 16px; text-align: center;">
+              <img src="${qrCodeUrl}" alt="Ticket QR code for ${checkInCode}" width="180" height="180" style="border: 0; display: inline-block; height: 180px; max-width: 180px; width: 180px;" />
+            </div>
             <div style="background-color: ${CREAM}; border-left: 4px solid ${CORAL_ORANGE}; border-radius: 10px; color: ${MIDNIGHT_NAVY}; font-family: 'Courier New', monospace; font-size: 20px; font-weight: 800; letter-spacing: 0; padding: 14px;">
               ${checkInCode}
             </div>
@@ -171,8 +316,8 @@ export const sendTicketEmail = async (
       })
       .join("");
 
-    const imageHtml = eventImage
-      ? `<img src="${escapeHtml(eventImage)}" alt="Event" style="border: 0; border-radius: 14px; display: block; margin: 0 0 22px 0; max-height: 260px; object-fit: cover; width: 100%;" />`
+    const imageHtml = imageSource
+      ? `<img src="${escapeHtml(imageSource)}" alt="Event" style="border: 0; border-radius: 14px; display: block; margin: 0 0 22px 0; max-height: 260px; object-fit: cover; width: 100%;" />`
       : "";
 
     const { data, error } = await resend.emails.send({
@@ -180,19 +325,22 @@ export const sendTicketEmail = async (
       to,
       subject: isDelayedReconciliation
         ? "Your Skaute access pass is ready"
-        : "Your Skaute access pass",
+        : `Your access pass for ${eventTitle}`,
       html: emailShell(`
         ${imageHtml}
         ${eyebrowHtml("Access confirmed")}
-        ${headingHtml("Your pass is ready.")}
+        ${headingHtml(eventTitle)}
         ${paragraphHtml(
           isDelayedReconciliation
             ? "Your payment has been reconciled and your access pass is now confirmed."
-            : "Your booking is confirmed. Keep this email handy and present your check-in code at the venue.",
+            : "Your booking is confirmed. Keep this email handy; it contains your event details, order summary, and check-in QR code.",
         )}
+        ${eventDetailsHtml}
+        ${orderSummaryHtml}
+        ${sectionTitleHtml(tickets.length > 1 ? "Your tickets" : "Your ticket")}
         ${ticketListHtml}
         ${paragraphHtml(
-          "For a smooth entry, bring a valid ID and use the same name or email attached to your booking where requested.",
+          "For a smooth entry, arrive with a valid ID and use the same name or email attached to your booking where requested. Do not share your QR code publicly.",
         )}
       `),
     });

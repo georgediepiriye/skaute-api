@@ -102,6 +102,22 @@ export const deleteHotspot = async (hotspotId: string) => {
   }
 };
 
+export const toggleHotspotActive = async (
+  hotspotId: string,
+  isActive: boolean,
+) => {
+  const hotspot = await Hotspot.findById(hotspotId);
+
+  if (!hotspot) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot not found");
+  }
+
+  hotspot.isActive = isActive;
+  await hotspot.save();
+
+  return hotspot;
+};
+
 export const castVibe = async (
   hotspotId: string,
   userId: string,

@@ -7,6 +7,7 @@ import { protect, restrictTo } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validate.js";
 
 import {
+  bulkTicketIssueSchema,
   processApprovalSchema,
   updateEventPromotionSchema,
   toggleUserStatusSchema,
@@ -44,6 +45,18 @@ router.patch(
   validate(updateEventPromotionSchema),
   adminController.updateEventPromotion,
 );
+
+router.post(
+  "/events/:id/tickets/bulk",
+  validate(bulkTicketIssueSchema),
+  adminController.issueBulkTickets,
+);
+
+// -----------------------------------
+// HOTSPOT MANAGEMENT
+// -----------------------------------
+
+router.get("/hotspots", adminController.getAllHotspots);
 
 // -----------------------------------
 // USER MANAGEMENT

@@ -26,6 +26,11 @@ router.get("/:id", eventController.getEvent);
 router.get("/slug/:slug", eventController.getEventBySlug);
 router.get("/count-active", eventController.getActiveMovesCount);
 router.post(
+  "/:id/view",
+  validate(eventIdParamSchema),
+  eventController.recordEventView,
+);
+router.post(
   "/:id/discounts/validate",
   validate(validateDiscountValidation),
   eventController.validateDiscountCode,

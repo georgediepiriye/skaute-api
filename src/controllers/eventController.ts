@@ -181,6 +181,37 @@ export const getEvent = async (
   }
 };
 
+export const recordEventView = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { event, counted } = await eventService.recordEventView(
+      req.params.id as string,
+      {
+        userId: (req as any).user?._id?.toString(),
+        ip: req.ip,
+        deviceFingerprint:
+          (req.headers["x-device-fingerprint"] as string) ||
+          req.body?.deviceFingerprint,
+        userAgent: req.headers["user-agent"],
+      },
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: {
+        eventId: event?._id,
+        views: event?.views,
+        counted,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getManagementDashboardData = async (
   req: Request,
   res: Response,

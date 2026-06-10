@@ -127,6 +127,7 @@ const createTicketsForOrder = async (
 
   return {
     tickets,
+    event: eventData,
     eventImage: eventData?.image,
   };
 };
@@ -249,14 +250,19 @@ export const processBooking = async (
         { session },
       );
 
-      const { tickets, eventImage } = await createTicketsForOrder(
+      const { tickets, event, eventImage } = await createTicketsForOrder(
         order,
         buyerDetails,
         session,
       );
 
       await session.commitTransaction();
-      skauteEvents.emit("order.fulfilled", { order, tickets, eventImage });
+      skauteEvents.emit("order.fulfilled", {
+        order,
+        tickets,
+        event,
+        eventImage,
+      });
 
       return {
         isFree: true,
@@ -384,7 +390,7 @@ export const fulfillOrder = async (
       }
     }
 
-    const { tickets, eventImage } = await createTicketsForOrder(
+    const { tickets, event, eventImage } = await createTicketsForOrder(
       order,
       metadata,
       session,
@@ -394,6 +400,7 @@ export const fulfillOrder = async (
     skauteEvents.emit("order.fulfilled", {
       order,
       tickets,
+      event,
       eventImage,
       isDelayedReconciliation,
     });
@@ -853,7 +860,9 @@ export const processManualCheckIn = async (
 };
 
 export const processResendTicket = async (ticketCode: string) => {
-  const ticket = await Ticket.findOne({ ticketCode }).populate("order");
+  const ticket = await Ticket.findOne({ ticketCode })
+    .populate("order")
+    .populate("event");
   if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
 
   skauteEvents.emit("ticket.resend", { ticket, order: ticket.order });

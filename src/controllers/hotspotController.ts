@@ -223,6 +223,29 @@ export const deleteHotspot = async (
   }
 };
 
+export const toggleHotspotActive = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const hotspot = await hotspotService.toggleHotspotActive(
+      req.params.hotspotId as string,
+      req.body.isActive,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: {
+        hotspot,
+        isActive: hotspot.isActive,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const castHotspotVibeCheck = async (
   req: any,
   res: Response,

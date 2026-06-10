@@ -6,6 +6,7 @@ import {
   castVibeCheckSchema,
   deleteHotspotSchema,
   getHotspotDetailsSchema,
+  toggleHotspotActiveSchema,
   updateHotspotSchema,
 } from "../validation/hotspotValidation.js";
 import { protect, restrictTo } from "../middleware/authMiddleware.js";
@@ -31,6 +32,14 @@ router.post(
   ]),
   validate(createHotspotSchema),
   hotspotController.createHotspot,
+);
+
+router.patch(
+  "/:hotspotId/toggle-active",
+  protect,
+  restrictTo("admin"),
+  validate(toggleHotspotActiveSchema),
+  hotspotController.toggleHotspotActive,
 );
 
 router.patch(

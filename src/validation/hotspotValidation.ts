@@ -113,6 +113,15 @@ export const deleteHotspotSchema = z.object({
   }),
 });
 
+export const toggleHotspotActiveSchema = z.object({
+  params: z.object({
+    hotspotId: objectIdSchema,
+  }),
+  body: z.object({
+    isActive: z.boolean(),
+  }),
+});
+
 export const castVibeCheckSchema = z.object({
   params: z.object({
     hotspotId: objectIdSchema,

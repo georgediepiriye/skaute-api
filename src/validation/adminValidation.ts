@@ -86,6 +86,26 @@ export const updateEventPromotionSchema = z.object({
   }),
 });
 
+export const bulkTicketIssueSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+
+  body: z.object({
+    guests: z
+      .array(
+        z.object({
+          firstName: z.string().trim().min(1, "First name is required"),
+          lastName: z.string().trim().min(1, "Last name is required"),
+          email: z.string().trim().email("A valid email address is required"),
+          tierId: objectIdSchema,
+        }),
+      )
+      .min(1, "At least one guest is required")
+      .max(500, "Bulk issue cannot exceed 500 guests at once"),
+  }),
+});
+
 // -----------------------------------
 // USER MANAGEMENT
 // -----------------------------------
@@ -140,6 +160,10 @@ export type ProcessApprovalInput = z.infer<
 
 export type UpdateEventPromotionInput = z.infer<
   typeof updateEventPromotionSchema
+>["body"];
+
+export type BulkTicketIssueInput = z.infer<
+  typeof bulkTicketIssueSchema
 >["body"];
 
 export type ToggleUserStatusInput = z.infer<
