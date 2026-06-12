@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import crypto from "node:crypto";
 import httpStatus from "http-status";
+import axios from "axios";
 import {
   ORDER_STATUS,
   SCAN_LOG_STATUS,
@@ -8,6 +9,8 @@ import {
 } from "../../lib/constants.js";
 import { Event } from "../../models/Event.js";
 import Hotspot from "../../models/Hotspot.js";
+import HotspotContribution from "../../models/HotspotContribution.js";
+import HotspotSuggestion from "../../models/HotspotSuggestion.js";
 import { Order } from "../../models/Order.js";
 import { Payout } from "../../models/Payout.js";
 import { ScanLog } from "../../models/ScanLog.js";
@@ -17,6 +20,14 @@ import { User } from "../../models/User.js";
 import skauteEvents from "../../utils/eventsEmitter.js";
 import config from "../../config/config.js";
 import AppError from "../../utils/AppError.js";
+import logger from "../../utils/logger.js";
+import { v2 as cloudinary } from "cloudinary";
+
+cloudinary.config({
+  cloud_name: config.cloudinary.cloudName,
+  api_key: config.cloudinary.apiKey,
+  api_secret: config.cloudinary.apiSecret,
+});
 
 export const getModerationQueue = async (query: any) => {
   // 1. FILTERING
@@ -92,6 +103,13 @@ export const getHotspotsList = async (query: any) => {
     "fields",
     "search",
     "neighborhood",
+    "source",
+    "importStatus",
+    "mapboxId",
+    "osmId",
+    "externalProvider",
+    "externalPlaceId",
+    "importBatchId",
   ];
   excludedFields.forEach((el) => delete queryObj[el]);
 
@@ -111,6 +129,9 @@ export const getHotspotsList = async (query: any) => {
   if (query.isActive !== undefined) {
     filter.isActive = query.isActive === "true";
   }
+  if (query.isVerified !== undefined) {
+    filter.isVerified = query.isVerified === "true";
+  }
 
   const page = Number(query.page) || 1;
   const limit = Number(query.limit) || 20;
@@ -128,7 +149,9 @@ export const getHotspotsList = async (query: any) => {
   return {
     hotspots,
     pagination: {
+      total: totalHotspots,
       totalHotspots,
+      pages: Math.ceil(totalHotspots / limit),
       totalPages: Math.ceil(totalHotspots / limit),
       page,
       limit,
@@ -139,6 +162,794 @@ export const getHotspotsList = async (query: any) => {
       },
     },
   };
+};
+
+const normalizeHotspotCategory = (category: string) =>
+  category === "others" ? "other" : category;
+
+export const getHotspotSuggestions = async (query: any) => {
+  const page = Number(query.page) || 1;
+  const limit = Number(query.limit) || 20;
+  const skip = (page - 1) * limit;
+  const filter: any = {};
+
+  if (query.status) filter.status = query.status;
+  if (query.search) {
+    filter.$or = [
+      { title: { $regex: query.search, $options: "i" } },
+      { "location.address": { $regex: query.search, $options: "i" } },
+      { "location.neighborhood": { $regex: query.search, $options: "i" } },
+      { "location.city": { $regex: query.search, $options: "i" } },
+      { "suggestedBy.name": { $regex: query.search, $options: "i" } },
+      { "suggestedBy.email": { $regex: query.search, $options: "i" } },
+    ];
+  }
+
+  const [suggestions, total] = await Promise.all([
+    HotspotSuggestion.find(filter).sort("-createdAt").skip(skip).limit(limit),
+    HotspotSuggestion.countDocuments(filter),
+  ]);
+
+  return {
+    suggestions,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit),
+    },
+  };
+};
+
+export const getHotspotSuggestionById = async (id: string) => {
+  const suggestion = await HotspotSuggestion.findById(id);
+  if (!suggestion) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
+  }
+  return suggestion;
+};
+
+export const updateHotspotSuggestion = async (id: string, data: any) => {
+  if (data.category) data.category = normalizeHotspotCategory(data.category);
+
+  const suggestion = await HotspotSuggestion.findByIdAndUpdate(id, data, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!suggestion) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
+  }
+
+  return suggestion;
+};
+
+export const approveHotspotSuggestion = async (
+  id: string,
+  adminId: string,
+) => {
+  const suggestion = await HotspotSuggestion.findById(id);
+  if (!suggestion) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
+  }
+
+  if (suggestion.status === "approved" && suggestion.createdHotspotId) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "This suggestion has already been approved.",
+    );
+  }
+
+  if (
+    !suggestion.location?.address &&
+    !suggestion.location?.neighborhood &&
+    !suggestion.location?.coordinates
+  ) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Suggestion needs an address, neighborhood, or coordinates before approval.",
+    );
+  }
+
+  const hotspot = await Hotspot.create({
+    title: suggestion.title,
+    description:
+      suggestion.note ||
+      "Suggested by the Skaute community. Details pending admin review.",
+    category: normalizeHotspotCategory(suggestion.category),
+    status: "CHILL",
+    image:
+      suggestion.image?.url ||
+      "https://picsum.photos/seed/skaute-hotspot/1200/800",
+    gallery: suggestion.image?.url ? [suggestion.image.url] : [],
+    location: {
+      type: "Point",
+      coordinates: suggestion.location?.coordinates || [7.0134, 4.8156],
+      address: suggestion.location?.address || "",
+      neighborhood: suggestion.location?.neighborhood || "",
+      city: suggestion.location?.city || "Port Harcourt",
+      state: suggestion.location?.state || "Rivers State",
+    },
+    activities: {
+      hasKaraoke: false,
+      hasLiveBand: false,
+      hasSnooker: false,
+      hasPoolside: false,
+      hasShisha: false,
+      hasVIPLounge: false,
+      hasOutdoorSeating: false,
+      hasArcadeGames: false,
+    },
+    features: [],
+    priceTier: "₦₦",
+    contact: suggestion.contact || {},
+    openingHours: [],
+    bestTimeToVisit: "To be confirmed",
+    energyRadius: 25,
+    isVerified: false,
+    isActive: false,
+  });
+
+  suggestion.status = "approved";
+  suggestion.reviewedBy = new mongoose.Types.ObjectId(adminId);
+  suggestion.reviewedAt = new Date();
+  suggestion.createdHotspotId = hotspot._id;
+  await suggestion.save();
+
+  return { hotspot, suggestion };
+};
+
+export const rejectHotspotSuggestion = async (
+  id: string,
+  adminId: string,
+  adminNotes?: string,
+) => {
+  const suggestion = await HotspotSuggestion.findById(id);
+  if (!suggestion) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
+  }
+
+  suggestion.status = "rejected";
+  suggestion.reviewedBy = new mongoose.Types.ObjectId(adminId);
+  suggestion.reviewedAt = new Date();
+  suggestion.adminNotes = adminNotes;
+  await suggestion.save();
+
+  return suggestion;
+};
+
+export const deleteHotspotSuggestion = async (id: string) => {
+  const suggestion = await HotspotSuggestion.findByIdAndDelete(id);
+  if (!suggestion) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
+  }
+
+  if (suggestion.image?.publicId) {
+    await cloudinary.uploader.destroy(suggestion.image.publicId);
+  }
+
+  return true;
+};
+
+type MapboxHotspotCandidate = {
+  source?: "mapbox";
+  sourceId: string;
+  name: string;
+  address?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  coordinates: [number, number];
+  sourceCategories?: string[];
+  category?: string;
+  distanceMeters?: number;
+  confidence?: number;
+};
+
+type OsmHotspotCandidate = {
+  source: "osm";
+  sourceId: string;
+  osmId: string;
+  osmType: "node" | "way" | "relation";
+  name: string;
+  category: string;
+  address: string;
+  neighborhood?: string;
+  coordinates: [number, number];
+  alreadyExists?: boolean;
+  existingHotspotId?: string | null;
+  confidence?: number;
+};
+
+const PH_AREAS: Record<string, { lng: number; lat: number }> = {
+  "Port Harcourt": { lng: 7.0134, lat: 4.8156 },
+  GRA: { lng: 7.0007, lat: 4.8276 },
+  "Old GRA": { lng: 7.0143, lat: 4.7898 },
+  "Trans Amadi": { lng: 7.0451, lat: 4.8231 },
+  Woji: { lng: 7.0528, lat: 4.8492 },
+  "Peter Odili": { lng: 7.0559, lat: 4.7906 },
+  "Ada George": { lng: 6.9735, lat: 4.8461 },
+  Rumuola: { lng: 7.0008, lat: 4.8357 },
+  "D-Line": { lng: 7.0061, lat: 4.8124 },
+  Abuloma: { lng: 7.0738, lat: 4.7786 },
+};
+
+const mapMapboxCategoryToHotspotCategory = (category: string) => {
+  const normalized = category.toLowerCase();
+
+  if (["bar", "nightclub"].includes(normalized)) return "nightlife";
+  if (["restaurant", "food_and_drink"].includes(normalized)) return "localeats";
+  if (normalized === "cafe") return "lifestyle";
+  if (normalized === "hotel") return "lifestyle";
+
+  return "other";
+};
+
+const normalizeCandidateName = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+
+const osmPreviewCache = new Map<
+  string,
+  { expiresAt: number; candidates: OsmHotspotCandidate[] }
+>();
+
+const calculateDistanceMeters = (
+  from: { lng: number; lat: number },
+  to: [number, number],
+) => {
+  const earthRadiusMeters = 6371000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRadians(to[1] - from.lat);
+  const dLng = toRadians(to[0] - from.lng);
+  const lat1 = toRadians(from.lat);
+  const lat2 = toRadians(to[1]);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return Math.round(
+    earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)),
+  );
+};
+
+const toMapboxCandidate = (
+  feature: any,
+  category: string,
+  areaCenter: { lng: number; lat: number },
+) => {
+  const coordinates =
+    feature.geometry?.coordinates ||
+    feature.coordinates ||
+    feature.properties?.coordinates;
+  const properties = feature.properties || {};
+  const context = properties.context || {};
+  const sourceId = properties.mapbox_id || feature.id;
+  const name =
+    properties.name ||
+    properties.name_preferred ||
+    feature.text ||
+    feature.place_name;
+
+  if (!sourceId || !name || !Array.isArray(coordinates) || coordinates.length < 2) {
+    return null;
+  }
+
+  const sourceCategories = [
+    ...(Array.isArray(properties.poi_category)
+      ? properties.poi_category
+      : [properties.poi_category]),
+    ...(Array.isArray(properties.category)
+      ? properties.category
+      : [properties.category]),
+  ].filter(Boolean);
+
+  return {
+    source: "mapbox" as const,
+    sourceId,
+    name,
+    address:
+      properties.full_address ||
+      properties.place_formatted ||
+      properties.address ||
+      feature.place_name ||
+      "",
+    neighborhood:
+      context.neighborhood?.name ||
+      properties.neighborhood ||
+      context.place?.name,
+    city: context.place?.name || "Port Harcourt",
+    state: context.region?.name || "Rivers State",
+    coordinates: [Number(coordinates[0]), Number(coordinates[1])] as [
+      number,
+      number,
+    ],
+    sourceCategories,
+    category,
+    distanceMeters: calculateDistanceMeters(areaCenter, [
+      Number(coordinates[0]),
+      Number(coordinates[1]),
+    ]),
+    confidence: properties.match_code?.confidence || properties.score,
+  };
+};
+
+const findDuplicateHotspot = async (candidate: MapboxHotspotCandidate) => {
+  const [lng, lat] = candidate.coordinates;
+  const normalizedName = normalizeCandidateName(candidate.name);
+  const normalizedAddress = normalizeCandidateName(candidate.address || "");
+  const sourceConditions: any[] = [
+    { source: "mapbox", sourceId: candidate.sourceId },
+    { mapboxId: candidate.sourceId },
+  ];
+
+  if ((candidate as any).source === "osm") {
+    sourceConditions.push({ source: "osm", sourceId: candidate.sourceId });
+    if ((candidate as any).osmId) {
+      sourceConditions.push({ osmId: (candidate as any).osmId });
+    }
+  }
+
+  const existingBySource = await Hotspot.findOne({
+    $or: sourceConditions,
+  }).select("_id title location sourceId mapboxId osmId");
+
+  if (existingBySource) return existingBySource;
+
+  const nearbyHotspots = await Hotspot.find({
+    location: {
+      $near: {
+        $geometry: { type: "Point", coordinates: [lng, lat] },
+        $maxDistance: 100,
+      },
+    },
+  }).select("_id title location");
+
+  const existingByName = nearbyHotspots.find(
+    (hotspot) => normalizeCandidateName(hotspot.title) === normalizedName,
+  );
+  if (existingByName) return existingByName;
+
+  if (!normalizedAddress) return null;
+
+  return Hotspot.findOne({
+    "location.address": { $regex: candidate.address || "", $options: "i" },
+  }).select("_id title location");
+};
+
+const buildOverpassQuery = (
+  osmTags: Record<string, string>[],
+  overpassBbox: [number, number, number, number],
+) => {
+  const bbox = overpassBbox.join(",");
+  const queries = osmTags.flatMap((tag) => {
+    return Object.entries(tag).flatMap(([key, value]) => {
+      const selector = `["${key}"="${value}"]`;
+      return [
+        `node${selector}(${bbox});`,
+        `way${selector}(${bbox});`,
+        `relation${selector}(${bbox});`,
+      ];
+    });
+  });
+
+  return `[out:json][timeout:25];(${queries.join("")});out center tags;`;
+};
+
+const fetchOverpassData = async (query: string) => {
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+  let lastError: any;
+
+  for (const endpoint of endpoints) {
+    try {
+      const body = new URLSearchParams({ data: query }).toString();
+      const { data } = await axios.post(endpoint, body, {
+        timeout: 30000,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+          "User-Agent": "Skaute API hotspot importer",
+        },
+      });
+
+      return data;
+    } catch (error: any) {
+      lastError = error;
+      const responseBody =
+        typeof error.response?.data === "string"
+          ? error.response.data.slice(0, 500)
+          : JSON.stringify(error.response?.data || {}).slice(0, 500);
+
+      logger.warn(
+        `OSM Overpass preview failed: endpoint=${endpoint} status=${error.response?.status || "NO_RESPONSE"} message=${error.message} body=${responseBody}`,
+      );
+    }
+  }
+
+  throw lastError;
+};
+
+const toOsmCandidate = ({
+  element,
+  category,
+  area,
+  rejectRegex,
+}: {
+  element: any;
+  category: string;
+  area: string;
+  rejectRegex: RegExp;
+}): OsmHotspotCandidate | null => {
+  const tags = element.tags || {};
+  const name = tags.name || tags["name:en"];
+  const lat = element.lat ?? element.center?.lat;
+  const lng = element.lon ?? element.center?.lon;
+
+  if (!name || lat === undefined || lng === undefined) return null;
+  if (rejectRegex.test(name)) return null;
+
+  const address = [
+    tags["addr:housenumber"],
+    tags["addr:street"],
+    tags["addr:suburb"],
+    tags["addr:city"],
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    source: "osm",
+    sourceId: `${element.type}/${element.id}`,
+    osmId: String(element.id),
+    osmType: element.type,
+    name,
+    category:
+      tags.amenity || tags.tourism || tags.leisure || tags.shop || category,
+    address,
+    neighborhood:
+      tags["addr:suburb"] ||
+      tags.neighbourhood ||
+      tags["is_in:neighbourhood"] ||
+      area,
+    coordinates: [Number(lng), Number(lat)],
+    confidence: 0.8,
+  };
+};
+
+export const previewOsmHotspotCandidates = async ({
+  category,
+  area,
+  osmTags,
+  overpassBbox,
+  limit,
+  rejectNamePattern,
+}: {
+  category: string;
+  area: string;
+  osmTags: Record<string, string>[];
+  overpassBbox: [number, number, number, number];
+  limit: number;
+  rejectNamePattern?: string;
+}) => {
+  const clampedLimit = Math.min(Number(limit) || 25, 50);
+  const cacheKey = JSON.stringify({
+    category,
+    area,
+    osmTags,
+    overpassBbox,
+    clampedLimit,
+    rejectNamePattern,
+  });
+  const cached = osmPreviewCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.candidates;
+  }
+
+  const rejectRegex = new RegExp(
+    rejectNamePattern ||
+      "road|rd|street|st|avenue|ave|expressway|highway|bypass|junction|roundabout|bridge|flyover|lane|drive|close|way|route",
+    "i",
+  );
+
+  try {
+    const data = await fetchOverpassData(
+      buildOverpassQuery(osmTags, overpassBbox),
+    );
+
+    const rawCandidates = (data.elements || [])
+      .map((element: any) =>
+        toOsmCandidate({ element, category, area, rejectRegex }),
+      )
+      .filter(Boolean)
+      .slice(0, clampedLimit);
+
+    const candidates = await Promise.all(
+      rawCandidates.map(async (candidate: OsmHotspotCandidate) => {
+        const existing = await findDuplicateHotspot(candidate as any);
+        return {
+          ...candidate,
+          alreadyExists: Boolean(existing),
+          existingHotspotId: existing?._id?.toString() || null,
+        };
+      }),
+    );
+
+    osmPreviewCache.set(cacheKey, {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      candidates,
+    });
+
+    return candidates;
+  } catch {
+    throw new AppError(httpStatus.BAD_GATEWAY, "Could not preview OSM venues");
+  }
+};
+
+export const previewMapboxHotspotCandidates = async ({
+  category,
+  area,
+  keyword,
+  radiusMeters,
+  limit,
+}: {
+  category: string;
+  area: string;
+  keyword?: string;
+  radiusMeters: number;
+  limit: number;
+}) => {
+  if (!config.mapbox.accessToken) {
+    throw new AppError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Mapbox access token is not configured.",
+    );
+  }
+
+  const areaCenter = PH_AREAS[area] || PH_AREAS["Port Harcourt"];
+  if (!areaCenter) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid Port Harcourt area.");
+  }
+
+  const clampedLimit = Math.min(Number(limit) || 25, 25);
+  const searchText = `${keyword || category} ${area} Port Harcourt Nigeria`;
+
+  try {
+    let data;
+    const categoryUrl = `https://api.mapbox.com/search/searchbox/v1/category/${encodeURIComponent(category)}`;
+    try {
+      const response = await axios.get(categoryUrl, {
+        params: {
+          proximity: `${areaCenter.lng},${areaCenter.lat}`,
+          country: "NG",
+          limit: clampedLimit,
+          access_token: config.mapbox.accessToken,
+        },
+      });
+      data = response.data;
+    } catch {
+      const textUrl = `https://api.mapbox.com/search/geocode/v6/forward`;
+      const response = await axios.get(textUrl, {
+        params: {
+          q: searchText,
+          proximity: `${areaCenter.lng},${areaCenter.lat}`,
+          country: "NG",
+          limit: clampedLimit,
+          access_token: config.mapbox.accessToken,
+        },
+      });
+      data = response.data;
+    }
+
+    const rawFeatures = data.features || data.suggestions || [];
+    const candidates = rawFeatures
+      .map((feature: any) => toMapboxCandidate(feature, category, areaCenter))
+      .filter((candidate: any) => {
+        return candidate && (!radiusMeters || candidate.distanceMeters <= radiusMeters);
+      })
+      .slice(0, clampedLimit);
+
+    return Promise.all(
+      candidates.map(async (candidate: any) => {
+        const existing = await findDuplicateHotspot(candidate);
+        return {
+          ...candidate,
+          address: candidate.address || "",
+          neighborhood: candidate.neighborhood || area,
+          alreadyExists: Boolean(existing),
+          existingHotspotId: existing?._id?.toString() || null,
+        };
+      }),
+    );
+  } catch {
+    throw new AppError(
+      httpStatus.BAD_GATEWAY,
+      "Could not preview Mapbox venues",
+    );
+  }
+};
+
+export const importMapboxHotspotCandidates = async (
+  candidates: MapboxHotspotCandidate[],
+  adminUserId?: string,
+) => {
+  const imported = [];
+  const skipped = [];
+
+  for (const candidate of candidates) {
+    const [lng, lat] = candidate.coordinates;
+    const existing = await findDuplicateHotspot(candidate);
+
+    if (existing) {
+      skipped.push({
+        sourceId: candidate.sourceId,
+        reason: "duplicate",
+        existingHotspotId: existing._id,
+      });
+      continue;
+    }
+
+    const hotspot = await Hotspot.create({
+      title: candidate.name,
+      description: "",
+      category: mapMapboxCategoryToHotspotCategory(candidate.category || "other"),
+      status: "ACTIVE",
+      image: "https://picsum.photos/seed/skaute-hotspot/1200/800",
+      gallery: [],
+      location: {
+        type: "Point",
+        coordinates: [lng, lat],
+        address: candidate.address || "",
+        neighborhood: candidate.neighborhood || "",
+        city: candidate.city || "Port Harcourt",
+        state: candidate.state || "Rivers State",
+      },
+      features: [],
+      isVerified: false,
+      isActive: false,
+      source: "mapbox",
+      sourceId: candidate.sourceId,
+      mapboxId: candidate.sourceId,
+      sourceCategories: candidate.sourceCategories || [],
+      importStatus: "needs_review",
+      importedBy: adminUserId ? new mongoose.Types.ObjectId(adminUserId) : undefined,
+      importedAt: new Date(),
+    });
+
+    imported.push(hotspot);
+  }
+
+  return { imported, skipped };
+};
+
+export const getHotspotContributionQueue = async (query: any) => {
+  const page = Number(query.page) || 1;
+  const limit = Number(query.limit) || 20;
+  const skip = (page - 1) * limit;
+  const filter: any = {};
+
+  if (query.status) filter.status = query.status;
+  else filter.status = "pending";
+  if (query.type) filter.type = query.type;
+
+  const [contributions, total] = await Promise.all([
+    HotspotContribution.find(filter)
+      .populate("hotspot", "title image location")
+      .sort("-createdAt")
+      .skip(skip)
+      .limit(limit),
+    HotspotContribution.countDocuments(filter),
+  ]);
+
+  return {
+    contributions,
+    pagination: {
+      page,
+      pages: Math.ceil(total / limit),
+      total,
+      limit,
+    },
+  };
+};
+
+const applyContributionToHotspot = async (hotspot: any, contribution: any) => {
+  const payload = contribution.payload || {};
+
+  if (contribution.type === "photo" && payload.imageUrl) {
+    const currentGallery = hotspot.gallery || [];
+    if (currentGallery.length < 5 && !currentGallery.includes(payload.imageUrl)) {
+      hotspot.gallery = [...currentGallery, payload.imageUrl];
+    }
+  }
+
+  if (contribution.type === "pin" && payload.coordinates?.length === 2) {
+    hotspot.location = {
+      ...hotspot.location,
+      type: "Point",
+      coordinates: payload.coordinates,
+    };
+  }
+
+  if (contribution.type === "hours" && payload.metadata?.openingHours) {
+    hotspot.openingHours = payload.metadata.openingHours;
+  }
+
+  if (contribution.type === "contact" && payload.value) {
+    const value = String(payload.value).trim();
+    hotspot.contact = hotspot.contact || {};
+
+    if (/^@/.test(value) || value.includes("instagram.com")) {
+      hotspot.contact.instagram = value;
+    } else if (/^https?:\/\//i.test(value)) {
+      hotspot.contact.website = value;
+    } else {
+      hotspot.contact.phone = value;
+    }
+  }
+
+  if (contribution.type === "description" && payload.value) {
+    hotspot.description = payload.value;
+  }
+
+  if (contribution.type === "closed") {
+    hotspot.isActive = false;
+  }
+
+  await hotspot.save();
+  return hotspot;
+};
+
+export const approveHotspotContribution = async (
+  contributionId: string,
+  adminId: string,
+  adminNote?: string,
+  applyMode: "auto" | "manual" = "auto",
+) => {
+  const contribution = await HotspotContribution.findById(contributionId);
+  if (!contribution) {
+    throw new AppError(httpStatus.NOT_FOUND, "Contribution not found");
+  }
+
+  const hotspot = await Hotspot.findById(contribution.hotspot);
+  if (!hotspot) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot not found");
+  }
+
+  let updatedHotspot = hotspot;
+  if (applyMode === "auto") {
+    updatedHotspot = await applyContributionToHotspot(hotspot, contribution);
+  }
+
+  contribution.status = "approved";
+  contribution.reviewedBy = new mongoose.Types.ObjectId(adminId);
+  contribution.reviewedAt = new Date();
+  contribution.adminNote = adminNote;
+  await contribution.save();
+
+  return { contribution, hotspot: updatedHotspot };
+};
+
+export const rejectHotspotContribution = async (
+  contributionId: string,
+  adminId: string,
+  adminNote?: string,
+) => {
+  const contribution = await HotspotContribution.findById(contributionId);
+  if (!contribution) {
+    throw new AppError(httpStatus.NOT_FOUND, "Contribution not found");
+  }
+
+  contribution.status = "rejected";
+  contribution.reviewedBy = new mongoose.Types.ObjectId(adminId);
+  contribution.reviewedAt = new Date();
+  contribution.adminNote = adminNote;
+  await contribution.save();
+
+  return contribution;
 };
 
 export const processBulkTicketIssue = async (

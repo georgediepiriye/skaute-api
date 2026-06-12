@@ -137,6 +137,90 @@ export const getHotspotDetailsSchema = z.object({
   }),
 });
 
+export const createHotspotContributionSchema = z.object({
+  params: z.object({
+    hotspotId: objectIdSchema,
+  }),
+  body: z.object({
+    type: z.enum([
+      "photo",
+      "pin",
+      "hours",
+      "contact",
+      "description",
+      "closed",
+      "duplicate",
+    ]),
+    payload: z
+      .object({
+        value: z.string().trim().optional(),
+        note: z.string().trim().optional(),
+        imageUrl: z.string().url().optional(),
+        coordinates: z
+          .tuple([
+            z.number().min(-180).max(180),
+            z.number().min(-90).max(90),
+          ])
+          .optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
+      })
+      .optional()
+      .default({}),
+    email: z.string().email().optional(),
+    name: z.string().trim().optional(),
+  }),
+});
+
+export const createHotspotSuggestionSchema = z
+  .object({
+    body: z.object({
+      title: z.string().trim().min(1, "Title is required"),
+      category: z.enum(hotspotCategories),
+      location: z
+        .object({
+          address: z.string().trim().optional(),
+          neighborhood: z.string().trim().optional(),
+          city: z.string().trim().optional().default("Port Harcourt"),
+          state: z.string().trim().optional().default("Rivers State"),
+          coordinates: z
+            .tuple([
+              z.number().min(-180).max(180),
+              z.number().min(-90).max(90),
+            ])
+            .optional(),
+        })
+        .optional()
+        .default({ city: "Port Harcourt", state: "Rivers State" }),
+      contact: z
+        .object({
+          phone: z.string().trim().optional(),
+          website: z.string().trim().optional(),
+          instagram: z.string().trim().optional(),
+        })
+        .optional()
+        .default({}),
+      note: z.string().trim().optional(),
+      suggestedBy: z
+        .object({
+          name: z.string().trim().optional(),
+          email: z.string().trim().email().optional(),
+        })
+        .optional()
+        .default({}),
+    }),
+  })
+  .superRefine((data, ctx) => {
+    const location = data.body.location || {};
+    if (!location.address && !location.neighborhood && !location.coordinates) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["body", "location"],
+        message:
+          "Please provide an address, neighborhood, or map coordinates for this hotspot.",
+      });
+    }
+  });
+
 export type CreateHotspotInput = z.infer<typeof createHotspotSchema>["body"];
 export type UpdateHotspotInput = z.infer<typeof updateHotspotSchema>["body"];
 export type CastVibeCheckInput = z.infer<typeof castVibeCheckSchema>["body"];

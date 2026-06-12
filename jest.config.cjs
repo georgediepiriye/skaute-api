@@ -4,6 +4,7 @@ module.exports = {
   testEnvironment: "node",
   testMatch: ["**/__tests__/**/*.test.ts"],
   extensionsToTreatAsEsm: [".ts"],
+  setupFiles: ["<rootDir>/src/__tests__/setupEnv.ts"],
 
   // --- COVERAGE CONFIGURATION ---
   collectCoverage: true,

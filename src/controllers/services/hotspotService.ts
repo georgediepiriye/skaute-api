@@ -1,4 +1,6 @@
 import Hotspot from "../../models/Hotspot.js";
+import HotspotContribution from "../../models/HotspotContribution.js";
+import HotspotSuggestion from "../../models/HotspotSuggestion.js";
 import { getIO } from "../../socket.js";
 import AppError from "../../utils/AppError.js";
 import httpStatus from "http-status";
@@ -116,6 +118,97 @@ export const toggleHotspotActive = async (
   await hotspot.save();
 
   return hotspot;
+};
+
+export const createHotspotContribution = async ({
+  hotspotId,
+  user,
+  ip,
+  type,
+  payload,
+}: {
+  hotspotId: string;
+  user?: any;
+  ip?: string;
+  type: string;
+  payload: any;
+}) => {
+  const hotspot = await Hotspot.findById(hotspotId);
+  if (!hotspot) {
+    throw new AppError(httpStatus.NOT_FOUND, "Hotspot not found");
+  }
+
+  const recentWindow = new Date(Date.now() - 10 * 60 * 1000);
+  const recentDuplicate = await HotspotContribution.findOne({
+    hotspot: hotspotId,
+    type,
+    status: "pending",
+    createdAt: { $gte: recentWindow },
+    $or: [
+      ...(user?._id ? [{ user: user._id }] : []),
+      ...(ip ? [{ "submittedBy.ip": ip }] : []),
+    ],
+  });
+
+  if (recentDuplicate) {
+    throw new AppError(
+      httpStatus.TOO_MANY_REQUESTS,
+      "A similar update was already submitted recently. Please try again later.",
+    );
+  }
+
+  const contribution = await HotspotContribution.create({
+    hotspot: hotspot._id,
+    user: user?._id || null,
+    type,
+    payload,
+    submittedBy: {
+      userId: user?._id || null,
+      email: user?.email || payload?.email || null,
+      name: user?.name || payload?.name || null,
+      ip: ip || null,
+    },
+  });
+
+  hotspot.lastContributionAt = new Date();
+  await hotspot.save();
+
+  return contribution;
+};
+
+export const createHotspotSuggestion = async ({
+  data,
+  image,
+  user,
+}: {
+  data: any;
+  image?: any;
+  user?: any;
+}) => {
+  const category = data.category === "others" ? "other" : data.category;
+
+  const suggestion = await HotspotSuggestion.create({
+    title: data.title,
+    category,
+    location: {
+      address: data.location?.address,
+      neighborhood: data.location?.neighborhood,
+      city: data.location?.city || "Port Harcourt",
+      state: data.location?.state || "Rivers State",
+      coordinates: data.location?.coordinates,
+    },
+    contact: data.contact || {},
+    note: data.note,
+    image,
+    suggestedBy: {
+      name: data.suggestedBy?.name,
+      email: data.suggestedBy?.email,
+      userId: user?._id,
+    },
+    status: "pending",
+  });
+
+  return suggestion;
 };
 
 export const castVibe = async (

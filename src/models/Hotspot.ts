@@ -117,6 +117,16 @@ export interface IHotspot {
   };
   bestTimeToVisit?: string;
   isActive: boolean;
+  source?: "manual" | "osm" | "mapbox" | "user";
+  sourceId?: string;
+  mapboxId?: string;
+  osmId?: string;
+  osmType?: "node" | "way" | "relation";
+  sourceCategories?: string[];
+  importStatus?: "needs_review" | "in_review" | "verified" | "rejected";
+  importedBy?: Types.ObjectId;
+  importedAt?: Date;
+  lastContributionAt?: Date;
 }
 
 export type HotspotDocument = HydratedDocument<IHotspot> & {
@@ -255,6 +265,41 @@ const hotspotSchema = new mongoose.Schema<HotspotDocument>(
 
     bestTimeToVisit: String,
     isActive: { type: Boolean, default: true },
+    source: {
+      type: String,
+      enum: ["manual", "osm", "mapbox", "user"],
+      default: "manual",
+      index: true,
+    },
+    sourceId: {
+      type: String,
+      index: true,
+    },
+    mapboxId: {
+      type: String,
+      index: true,
+    },
+    osmId: {
+      type: String,
+      index: true,
+    },
+    osmType: {
+      type: String,
+      enum: ["node", "way", "relation"],
+    },
+    sourceCategories: [String],
+    importStatus: {
+      type: String,
+      enum: ["needs_review", "in_review", "verified", "rejected"],
+      default: undefined,
+      index: true,
+    },
+    importedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    importedAt: Date,
+    lastContributionAt: Date,
   },
   {
     timestamps: true,
@@ -274,6 +319,9 @@ hotspotSchema.index({
   "location.neighborhood": "text",
   features: "text",
 });
+hotspotSchema.index({ source: 1, sourceId: 1 });
+hotspotSchema.index({ isActive: 1 });
+hotspotSchema.index({ isVerified: 1 });
 
 /**
  * ==========================================

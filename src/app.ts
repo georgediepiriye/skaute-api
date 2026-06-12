@@ -18,10 +18,11 @@ import cookieParser from "cookie-parser";
 import config from "./config/config.js";
 import passport from "passport";
 import "./config/passport.js";
+import { globalLimiter } from "./utils/rateLimitter.js";
 
 const app = express();
 
-app.enable("trust proxy");
+app.set("trust proxy", 1);
 
 /**
  * LOGGING MIDDLEWARE (Morgan + Winston)
@@ -76,6 +77,8 @@ app.post(
   express.raw({ type: "application/json" }),
   webhookController.handlePaystackWebhook,
 );
+
+app.use("/v1", globalLimiter);
 
 /**
  * 2. BODY PARSERS

@@ -29,6 +29,34 @@ const uploadHotspotImage = async (
   return uploadResult.secure_url;
 };
 
+const uploadHotspotImageDetails = async (
+  file: Express.Multer.File,
+  folder: string,
+) => {
+  const uploadResult = await new Promise<any>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      },
+    );
+
+    stream.end(file.buffer);
+  });
+
+  return {
+    url: uploadResult.secure_url,
+    publicId: uploadResult.public_id,
+    resourceType: uploadResult.resource_type,
+    format: uploadResult.format,
+    bytes: uploadResult.bytes,
+    width: uploadResult.width,
+    height: uploadResult.height,
+    uploadedAt: new Date(),
+  };
+};
+
 export const getAllHotspots = async (
   req: Request,
   res: Response,
@@ -90,7 +118,10 @@ export const createHotspot = async (
     // COVER IMAGE
     // ==========================
 
-    let imageUrl = "";
+    let imageUrl =
+      hotspotData.image ||
+      hotspotData.coverImage ||
+      "https://picsum.photos/seed/skaute-hotspot/1200/800";
 
     if (files?.image?.[0]) {
       imageUrl = await uploadHotspotImage(files.image[0], "skaute/hotspots");
@@ -100,7 +131,9 @@ export const createHotspot = async (
     // GALLERY IMAGES
     // ==========================
 
-    const galleryUrls: string[] = [];
+    const galleryUrls: string[] = Array.isArray(hotspotData.gallery)
+      ? hotspotData.gallery
+      : [];
 
     if (files?.gallery?.length) {
       for (const image of files.gallery) {
@@ -239,6 +272,88 @@ export const toggleHotspotActive = async (
       data: {
         hotspot,
         isActive: hotspot.isActive,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createHotspotContribution = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const file = req.file as Express.Multer.File | undefined;
+    const rawPayload =
+      typeof req.body.payload === "string"
+        ? JSON.parse(req.body.payload || "{}")
+        : req.body.payload || {};
+
+    const payload = {
+      ...rawPayload,
+      email: req.body.email || rawPayload.email,
+      name: req.body.name || rawPayload.name,
+    };
+
+    if (file) {
+      payload.imageUrl = await uploadHotspotImage(
+        file,
+        "skaute/hotspots/contributions",
+      );
+    }
+
+    const contribution = await hotspotService.createHotspotContribution({
+      hotspotId: req.params.hotspotId as string,
+      user: (req as any).user,
+      ip: req.ip,
+      type: req.body.type,
+      payload,
+    });
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      message: "Update sent for review",
+      data: { contribution },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const file = req.file as Express.Multer.File | undefined;
+    const image = file
+      ? await uploadHotspotImageDetails(file, "skaute/hotspot-suggestions")
+      : undefined;
+
+    const suggestion = await hotspotService.createHotspotSuggestion({
+      data: req.body,
+      image,
+      user: (req as any).user,
+    });
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      message: "Hotspot suggestion submitted for review",
+      data: {
+        suggestion: {
+          id: suggestion._id,
+          title: suggestion.title,
+          category: suggestion.category,
+          status: suggestion.status,
+          location: suggestion.location,
+          contact: suggestion.contact,
+          note: suggestion.note,
+          image: suggestion.image?.url ? suggestion.image : undefined,
+          createdAt: suggestion.createdAt,
+        },
       },
     });
   } catch (error) {

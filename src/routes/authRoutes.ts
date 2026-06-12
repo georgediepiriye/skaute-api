@@ -6,17 +6,18 @@ import { protect } from "../middleware/authMiddleware.js";
 import passport from "passport";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
+import { authLimiter, loginLimiter, oauthLimiter } from "../utils/rateLimitter.js";
 
 const router = Router();
 
-router.post("/signup", validate(signupSchema), authController.signup);
-router.post("/login", validate(loginSchema), authController.login);
+router.post("/signup", authLimiter, validate(signupSchema), authController.signup);
+router.post("/login", loginLimiter, validate(loginSchema), authController.login);
 router.post("/logout", authController.logout);
 
 router.get("/me", protect, authController.getMe);
 
 // 1. Redirect user to Google
-router.get("/google", (req, res, next) => {
+router.get("/google", oauthLimiter, (req, res, next) => {
   const callbackUrl = (req.query.callbackUrl as string) || "/profile";
   const statePayload = Buffer.from(JSON.stringify({ callbackUrl })).toString(
     "base64",
@@ -32,6 +33,7 @@ router.get("/google", (req, res, next) => {
 // 2. Google redirects back here
 router.get(
   "/google/callback",
+  oauthLimiter,
   passport.authenticate("google", {
     session: false,
     failureRedirect: `${config.clientUrl}/auth/signin?error=OAuthFailed`,

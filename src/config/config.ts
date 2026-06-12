@@ -57,6 +57,7 @@ const envVarsSchema = z
     CLOUDINARY_CLOUD_NAME: z.string().describe("Cloudinary cloud name"),
     CLOUDINARY_API_KEY: z.string().describe("Cloudinary API key"),
     CLOUDINARY_API_SECRET: z.string().describe("Cloudinary API secret"),
+    MAPBOX_ACCESS_TOKEN: z.string().optional().describe("Mapbox access token"),
 
     // Logic/Taxation
     SKAUTE_FEE_PERCENT: z
@@ -141,6 +142,9 @@ const config = {
     cloudName: envVars.CLOUDINARY_CLOUD_NAME,
     apiKey: envVars.CLOUDINARY_API_KEY,
     apiSecret: envVars.CLOUDINARY_API_SECRET,
+  },
+  mapbox: {
+    accessToken: envVars.MAPBOX_ACCESS_TOKEN,
   },
 } as const;
 

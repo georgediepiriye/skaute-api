@@ -106,6 +106,152 @@ export const bulkTicketIssueSchema = z.object({
   }),
 });
 
+export const mapboxCandidateSchema = z.object({
+  source: z.literal("mapbox").optional().default("mapbox"),
+  sourceId: z.string().trim().min(1, "Mapbox source ID is required"),
+  name: z.string().trim().min(1, "Venue name is required"),
+  title: z.string().trim().optional(),
+  address: z.string().trim().optional(),
+  neighborhood: z.string().trim().optional(),
+  city: z.string().trim().optional(),
+  state: z.string().trim().optional(),
+  coordinates: z.tuple([
+    z.number().min(-180).max(180),
+    z.number().min(-90).max(90),
+  ]),
+  sourceCategories: z.array(z.string()).optional().default([]),
+  category: z
+    .string()
+    .trim()
+    .optional()
+    .default("other"),
+  distanceMeters: z.number().optional(),
+  alreadyExists: z.boolean().optional(),
+  existingHotspotId: objectIdSchema.nullable().optional(),
+  confidence: z.number().optional(),
+});
+
+export const mapboxHotspotPreviewSchema = z.object({
+  body: z.object({
+    category: z.string().trim().min(1, "Category is required"),
+    area: z.string().trim().optional().default("Port Harcourt"),
+    keyword: z.string().trim().optional(),
+    radiusMeters: z.number().int().min(100).max(50000).optional().default(5000),
+    limit: z.number().int().min(1).max(25).optional().default(25),
+  }),
+});
+
+export const mapboxHotspotImportSchema = z.object({
+  body: z
+    .object({
+      sourceIds: z.array(z.string().trim().min(1)).optional().default([]),
+      candidates: z.array(mapboxCandidateSchema).optional().default([]),
+    })
+    .refine(
+      (data) => data.sourceIds.length > 0 || data.candidates.length > 0,
+      {
+        message: "sourceIds or candidates are required",
+        path: ["candidates"],
+      },
+    ),
+});
+
+const osmTagSchema = z.record(z.string().min(1), z.string().min(1));
+
+export const osmHotspotPreviewSchema = z.object({
+  body: z.object({
+    source: z.literal("osm").optional().default("osm"),
+    category: z.string().trim().min(1, "Category is required"),
+    osmTag: osmTagSchema.optional(),
+    osmTags: z.array(osmTagSchema).min(1, "At least one OSM tag is required"),
+    area: z.string().trim().optional().default("Port Harcourt"),
+    areaCenter: z
+      .object({
+        lng: z.number().min(-180).max(180),
+        lat: z.number().min(-90).max(90),
+      })
+      .optional(),
+    bbox: z
+      .tuple([
+        z.number().min(-180).max(180),
+        z.number().min(-90).max(90),
+        z.number().min(-180).max(180),
+        z.number().min(-90).max(90),
+      ])
+      .optional(),
+    overpassBbox: z.tuple([
+      z.number().min(-90).max(90),
+      z.number().min(-180).max(180),
+      z.number().min(-90).max(90),
+      z.number().min(-180).max(180),
+    ]),
+    country: z.string().trim().length(2).optional().default("NG"),
+    keyword: z.string().trim().optional().default(""),
+    radiusMeters: z.number().int().min(100).max(50000).optional().default(5000),
+    limit: z.number().int().min(1).max(50).optional().default(25),
+    rejectNamePattern: z.string().trim().optional(),
+  }),
+});
+
+export const hotspotContributionReviewSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+  body: z.object({
+    adminNote: z.string().trim().optional(),
+    applyMode: z.enum(["auto", "manual"]).optional().default("auto"),
+  }),
+});
+
+export const adminHotspotSuggestionIdSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+});
+
+export const updateHotspotSuggestionSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+  body: z.object({
+    title: z.string().trim().min(1).optional(),
+    category: z.string().trim().min(1).optional(),
+    location: z
+      .object({
+        address: z.string().trim().optional(),
+        neighborhood: z.string().trim().optional(),
+        city: z.string().trim().optional(),
+        state: z.string().trim().optional(),
+        coordinates: z
+          .tuple([
+            z.number().min(-180).max(180),
+            z.number().min(-90).max(90),
+          ])
+          .optional(),
+      })
+      .optional(),
+    contact: z
+      .object({
+        phone: z.string().trim().optional(),
+        website: z.string().trim().optional(),
+        instagram: z.string().trim().optional(),
+      })
+      .optional(),
+    note: z.string().trim().optional(),
+    adminNotes: z.string().trim().optional(),
+    status: z.enum(["pending", "approved", "rejected"]).optional(),
+  }),
+});
+
+export const rejectHotspotSuggestionSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+  body: z.object({
+    adminNotes: z.string().trim().optional(),
+  }),
+});
+
 // -----------------------------------
 // USER MANAGEMENT
 // -----------------------------------

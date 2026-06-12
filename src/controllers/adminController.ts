@@ -80,6 +80,196 @@ export const getAllHotspots = async (
   }
 };
 
+export const getHotspotSuggestions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { suggestions, pagination } =
+      await adminService.getHotspotSuggestions(req.query);
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { suggestions, pagination },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const suggestion = await adminService.getHotspotSuggestionById(
+      req.params.id as string,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { suggestion },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const suggestion = await adminService.updateHotspotSuggestion(
+      req.params.id as string,
+      req.body,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { suggestion },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const approveHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId =
+      (req.user as any)?._id?.toString() || (req.user as any)?.id?.toString();
+    const { suggestion, hotspot } = await adminService.approveHotspotSuggestion(
+      req.params.id as string,
+      adminId,
+    );
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      message: "Suggestion approved and hotspot created",
+      data: { hotspot, suggestion },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rejectHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId =
+      (req.user as any)?._id?.toString() || (req.user as any)?.id?.toString();
+    const suggestion = await adminService.rejectHotspotSuggestion(
+      req.params.id as string,
+      adminId,
+      req.body.adminNotes,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Suggestion rejected",
+      data: { suggestion },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteHotspotSuggestion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    await adminService.deleteHotspotSuggestion(req.params.id as string);
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Suggestion deleted",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getHotspotContributionQueue = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { contributions, pagination } =
+      await adminService.getHotspotContributionQueue(req.query);
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { contributions },
+      pagination,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const approveHotspotContribution = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId =
+      (req.user as any)?._id?.toString() || (req.user as any)?.id?.toString();
+    const { contribution, hotspot } =
+      await adminService.approveHotspotContribution(
+        req.params.id as string,
+        adminId,
+        req.body.adminNote,
+        req.body.applyMode,
+      );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Contribution approved",
+      data: { contribution, hotspot },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rejectHotspotContribution = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId =
+      (req.user as any)?._id?.toString() || (req.user as any)?.id?.toString();
+    const contribution = await adminService.rejectHotspotContribution(
+      req.params.id as string,
+      adminId,
+      req.body.adminNote,
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      message: "Contribution rejected",
+      data: { contribution },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const issueBulkTickets = async (
   req: Request,
   res: Response,

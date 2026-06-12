@@ -14,6 +14,13 @@ import {
   updateCoOrganizerPermissionsValidation,
   issueManualTicketValidation,
 } from "../validation/eventValidation.js";
+import {
+  discountLimiter,
+  eventViewLimiter,
+  ticketActionLimiter,
+  uploadLimiter,
+  writeLimiter,
+} from "../utils/rateLimitter.js";
 import multer from "multer";
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -27,11 +34,13 @@ router.get("/slug/:slug", eventController.getEventBySlug);
 router.get("/count-active", eventController.getActiveMovesCount);
 router.post(
   "/:id/view",
+  eventViewLimiter,
   validate(eventIdParamSchema),
   eventController.recordEventView,
 );
 router.post(
   "/:id/discounts/validate",
+  discountLimiter,
   validate(validateDiscountValidation),
   eventController.validateDiscountCode,
 );
@@ -42,11 +51,12 @@ router.use(protect);
 
 router.post(
   "/",
+  uploadLimiter,
   upload.single("image"),
   validate(createEventSchema),
   eventController.createEvent,
 );
-router.patch("/:id", validate(updateEventSchema), eventController.updateEvent);
+router.patch("/:id", writeLimiter, validate(updateEventSchema), eventController.updateEvent);
 router.get(
   "/:id/manage",
   validate(eventIdParamSchema),
@@ -55,24 +65,28 @@ router.get(
 
 router.post(
   "/:id/tickets/issue-manual",
+  ticketActionLimiter,
   validate(issueManualTicketValidation),
   eventController.issueManualTicket,
 );
 
 router.patch(
   "/:eventId/co-organizers",
+  writeLimiter,
   validate(addCoOrganizerSchema),
   eventController.addCoOrganizer,
 );
 
 router.delete(
   "/:eventId/co-organizers/:partnerId",
+  writeLimiter,
   validate(removeCoOrganizerSchema),
   eventController.removeCoOrganizer,
 );
 
 router.patch(
   "/:id/update-coorganizer-permissions",
+  writeLimiter,
   validate(updateCoOrganizerPermissionsValidation),
   eventController.updateCoOrganizerPermissions,
 );
@@ -80,27 +94,31 @@ router.patch(
 // --- DISCOUNT ROUTES ---
 router.patch(
   "/:id/discounts",
+  writeLimiter,
   validate(createDiscountValidation),
   eventController.createDiscountCode,
 );
 
 router.delete(
   "/:id/discounts/:discountId",
+  writeLimiter,
   validate(deleteDiscountValidation),
   eventController.deleteDiscountCode,
 );
 
-router.patch("/:id/toggle-sold-out", eventController.toggleSoldOutStatus);
+router.patch("/:id/toggle-sold-out", writeLimiter, eventController.toggleSoldOutStatus);
 router.get("/:eventId/gate-control", eventController.getGateControlTelemetry);
 
 router.patch(
   "/:id/cancel",
+  writeLimiter,
   validate(eventIdParamSchema),
   eventController.cancelEvent,
 );
 
 router.delete(
   "/:id",
+  writeLimiter,
   validate(eventIdParamSchema),
   eventController.deleteEvent,
 );
