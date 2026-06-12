@@ -16,6 +16,119 @@ import crypto from "node:crypto";
 import { ORDER_STATUS } from "../../lib/constants.js";
 import { Order } from "../../models/Order.js";
 import { Transaction } from "../../models/Transaction.js";
+import { EventAuditLog } from "../../models/EventAuditLog.js";
+import {
+  BroadcastAudience,
+  EventBroadcast,
+} from "../../models/EventBroadcast.js";
+import { GateIncident } from "../../models/GateIncident.js";
+import { ScannerDevice } from "../../models/ScannerDevice.js";
+import { EventRefund } from "../../models/EventRefund.js";
+import { TICKET_STATUS, SCAN_LOG_STATUS } from "../../lib/constants.js";
+
+const getActorId = (userId?: string) =>
+  userId && Types.ObjectId.isValid(userId)
+    ? new Types.ObjectId(userId)
+    : undefined;
+
+export const createEventAuditLog = async ({
+  eventId,
+  action,
+  category,
+  summary,
+  actor,
+  severity = "info",
+  metadata = {},
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string | Types.ObjectId;
+  action: string;
+  category: string;
+  summary: string;
+  actor?: string;
+  severity?: "info" | "warning" | "critical";
+  metadata?: Record<string, any>;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  return EventAuditLog.create({
+    eventId,
+    action,
+    category,
+    summary,
+    actor: getActorId(actor),
+    severity,
+    metadata,
+    ipAddress,
+    userAgent,
+  });
+};
+
+const assertEventPermission = async (
+  eventId: string,
+  userId: string,
+  permission?: CoOrganizerPermission,
+) => {
+  if (!Types.ObjectId.isValid(eventId)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Invalid Event ID format");
+  }
+
+  const event = await Event.findById(eventId);
+  if (!event) throw new AppError(httpStatus.NOT_FOUND, "Event not found");
+
+  const isOrganizer = event.organizer.toString() === userId;
+  const partnerRecord = event.coOrganizers?.find((coOrg: any) => {
+    const coOrgId = coOrg.user?._id || coOrg.user?.id || coOrg.user;
+    return coOrgId?.toString() === userId;
+  });
+
+  if (isOrganizer || (!permission && partnerRecord)) {
+    return { event, isOrganizer, partnerRecord };
+  }
+
+  if (permission && partnerRecord?.permissions?.includes(permission)) {
+    return { event, isOrganizer, partnerRecord };
+  }
+
+  throw new AppError(
+    httpStatus.FORBIDDEN,
+    "You do not have permission to perform this event operation",
+  );
+};
+
+const getBroadcastTicketFilter = (
+  eventId: string | Types.ObjectId,
+  audience: BroadcastAudience,
+) => {
+  const base: any = { event: eventId };
+
+  if (audience === "all") {
+    base.status = { $nin: [TICKET_STATUS.cancelled, TICKET_STATUS.refunded] };
+  } else if (audience === "valid") {
+    base.status = { $in: [TICKET_STATUS.valid, TICKET_STATUS.transferred] };
+  } else if (audience === "checked-in") {
+    base.status = TICKET_STATUS.used;
+  } else if (audience === "not-checked-in") {
+    base.status = { $in: [TICKET_STATUS.valid, TICKET_STATUS.transferred] };
+  }
+
+  return base;
+};
+
+const serializeAuditLog = (log: any) => ({
+  _id: log._id,
+  eventId: log.eventId,
+  action: log.action,
+  category: log.category,
+  summary: log.summary,
+  severity: log.severity,
+  actor: log.actor,
+  metadata: log.metadata || {},
+  ipAddress: log.ipAddress,
+  userAgent: log.userAgent,
+  createdAt: log.createdAt,
+});
 
 export const createNewEvent = async (
   eventData: Partial<IEvent>,
@@ -743,6 +856,21 @@ export const getManagementDashboardData = async (
     };
   });
 
+  const scannerDeviceCount = await ScannerDevice.countDocuments({
+    eventId: event._id,
+    status: { $ne: "revoked" },
+  });
+  const hasVenue =
+    event.isOnline ||
+    Boolean(event.location?.address || event.location?.coordinates?.length);
+  const hasPublicLink = Boolean(
+    event.slug || event.joinLink || event.meetingLink,
+  );
+  const hasTicketing =
+    event.ticketingType === "none" ||
+    event.isFree ||
+    (Array.isArray(event.ticketTiers) && event.ticketTiers.length > 0);
+
   /**
    * 9. GUEST LIST ATTENDEES WITH FRONTEND SCHEMA SYNC
    */
@@ -844,6 +972,14 @@ export const getManagementDashboardData = async (
       },
       salesByTier,
     },
+    readiness: {
+      eventApproved: event.approvalStatus === "approved",
+      ticketingReady: hasTicketing,
+      payoutReady: withdrawableBalance > 0 || totalCombinedGrossRevenue === 0,
+      scannerReady: scannerDeviceCount > 0 || stats.totalSold === 0,
+      venueReady: hasVenue,
+      publicLinkReady: hasPublicLink,
+    },
   };
 };
 
@@ -901,6 +1037,19 @@ export const addPartnerToEvent = async (
     { new: true, runValidators: true },
   ).populate("coOrganizers.user", "name email image");
 
+  await createEventAuditLog({
+    eventId,
+    actor: organizerId,
+    action: "co_organizer.added",
+    category: "co_organizer",
+    summary: `Co-organizer added: ${userToAdd.email}`,
+    metadata: {
+      coOrganizerId: userToAdd._id,
+      email: userToAdd.email,
+      permissions,
+    },
+  });
+
   return updatedEvent;
 };
 
@@ -937,6 +1086,15 @@ export const removePartnerFromEvent = async (
       "Failed to update event tracking configurations",
     );
   }
+
+  await createEventAuditLog({
+    eventId,
+    actor: organizerId,
+    action: "co_organizer.removed",
+    category: "co_organizer",
+    summary: "Co-organizer removed",
+    metadata: { partnerId },
+  });
 
   return updatedEvent;
 };
@@ -1161,6 +1319,22 @@ export const toggleEventSoldOut = async (
   // 4. Save the document - Mongoose handles the internal versioning
   await event.save();
 
+  await createEventAuditLog({
+    eventId,
+    actor: userId,
+    action: "event.sold_out_toggled",
+    category: "event",
+    summary: tierId
+      ? "Ticket tier sold-out status toggled"
+      : "Event sold-out status toggled",
+    metadata: {
+      tierId,
+      isSoldOut: tierId
+        ? event.ticketTiers.id(tierId)?.isSoldOut
+        : event.isSoldOut,
+    },
+  });
+
   return event;
 };
 
@@ -1207,6 +1381,15 @@ export const updateCoOrganizerPermissions = async (
       "Target collaborator profile not linked to this event configuration",
     );
   }
+
+  await createEventAuditLog({
+    eventId,
+    actor: userId,
+    action: "co_organizer.permissions_changed",
+    category: "co_organizer",
+    summary: "Co-organizer permissions updated",
+    metadata: { coOrganizerId, permissions },
+  });
 
   return updatedEvent;
 };
@@ -1355,15 +1538,80 @@ export const getGateControlTelemetryData = async (
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
+  const [storedDevices, openIncidents] = await Promise.all([
+    ScannerDevice.find({ eventId: targetEventId }).lean(),
+    GateIncident.find({ eventId: targetEventId, status: "open" })
+      .sort({ createdAt: -1 })
+      .limit(25)
+      .lean(),
+  ]);
+
+  const deviceScanCounts = scanLogs.reduce<Record<string, number>>(
+    (acc, log) => {
+      const key = log.deviceFingerprint || "OFFLINE-TERM";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    },
+    {},
+  );
+
+  const deviceLastSeen = scanLogs.reduce<Record<string, Date>>((acc, log) => {
+    const key = log.deviceFingerprint || "OFFLINE-TERM";
+    const seenAt = new Date(log.scannedAt || log.createdAt);
+    if (!acc[key] || seenAt > acc[key]) acc[key] = seenAt;
+    return acc;
+  }, {});
+
+  const registeredDeviceIds = new Set(
+    storedDevices.map((device) => device.deviceId),
+  );
+  const derivedDevices = Array.from(activeDevices)
+    .filter((deviceId) => !registeredDeviceIds.has(deviceId))
+    .map((deviceId) => ({
+      deviceId,
+      label: deviceId === "OFFLINE-TERM" ? "Offline terminal" : "Scanner",
+      operatorName: "Unknown operator",
+      lastSeen: deviceLastSeen[deviceId],
+      scanCount: deviceScanCounts[deviceId] || 0,
+      status: "active",
+    }));
+
+  const devices = [
+    ...storedDevices.map((device) => ({
+      deviceId: device.deviceId,
+      label: device.label,
+      operatorName: device.operatorName || "Unknown operator",
+      lastSeen: device.lastSeen || deviceLastSeen[device.deviceId],
+      scanCount: device.scanCount || deviceScanCounts[device.deviceId] || 0,
+      status: device.status,
+    })),
+    ...derivedDevices,
+  ];
+
+  const mergedFraudAlerts = [
+    ...openIncidents.map((incident) => ({
+      _id: incident._id,
+      type: incident.type,
+      severity: incident.severity,
+      message: incident.summary,
+      status: incident.status,
+      metadata: incident.metadata,
+      timestamp: incident.createdAt,
+    })),
+    ...fraudAlerts,
+  ];
+
   return {
     summary: {
       verifiedCount,
       remainingCount,
-      activeDevicesCount: activeDevices.size,
-      fraudAlertsCount: fraudAlerts.length,
+      activeDevicesCount: devices.filter((device) => device.status === "active")
+        .length,
+      fraudAlertsCount: mergedFraudAlerts.length,
     },
-    fraudAlerts: fraudAlerts.slice(0, 10),
+    fraudAlerts: mergedFraudAlerts.slice(0, 10),
     liveFeed: liveFeed.slice(0, 25),
+    devices,
   };
 };
 
@@ -1388,6 +1636,16 @@ export const cancelEvent = async (eventId: string, userId: string) => {
   event.isCancelled = true;
   event.status = "cancelled";
   await event.save();
+
+  await createEventAuditLog({
+    eventId,
+    actor: userId,
+    action: "event.cancelled",
+    category: "event",
+    summary: "Event cancelled",
+    severity: "warning",
+    metadata: { ticketsSold: event.ticketsSold || 0 },
+  });
 
   logger.warn(
     `Event Cancelled: ID=${eventId} by User=${userId}. Ticket sales hold state: ${event.ticketsSold || 0}`,
@@ -1451,6 +1709,15 @@ export const deleteEvent = async (eventId: string, userId: string) => {
 
   // Safe to remove completely since ticketsSold is 0
   await Event.findByIdAndDelete(eventId);
+
+  await createEventAuditLog({
+    eventId,
+    actor: userId,
+    action: "event.deleted",
+    category: "event",
+    summary: "Event deleted",
+    severity: "warning",
+  });
 
   // Clean up children variants if it was a parent setup
   if (event.isRecurring && !event.recurrence?.parentId) {
@@ -1607,6 +1874,21 @@ export const issueManualComplimentaryTicket = async (
     // Everything matches constraints—commit transaction safely
     await session.commitTransaction();
 
+    await createEventAuditLog({
+      eventId: event._id,
+      actor: input.operatorId,
+      action: "ticket.manual_issued",
+      category: "ticket",
+      summary: `Manual ticket issued to ${input.firstName} ${input.lastName}`,
+      metadata: {
+        ticketId: newTicket._id,
+        ticketCode: newTicket.ticketCode,
+        checkInCode: newTicket.checkInCode,
+        paymentMethod: input.paymentMethod,
+        email: input.email,
+      },
+    });
+
     // 10. Fire Asynchronous Notification Side-Effects
     try {
       skauteEvents.emit("order.fulfilled", {
@@ -1638,4 +1920,472 @@ export const issueManualComplimentaryTicket = async (
   } finally {
     await session.endSession();
   }
+};
+
+export const getEventBroadcasts = async (eventId: string, userId: string) => {
+  await assertEventPermission(eventId, userId);
+
+  return EventBroadcast.find({ eventId })
+    .sort({ createdAt: -1 })
+    .populate("sentBy", "name email")
+    .lean();
+};
+
+export const createEventBroadcast = async ({
+  eventId,
+  userId,
+  channel,
+  audience,
+  subject,
+  message,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  userId: string;
+  channel: "email";
+  audience: BroadcastAudience;
+  subject: string;
+  message: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  const { event } = await assertEventPermission(
+    eventId,
+    userId,
+    "send_broadcasts",
+  );
+  console.log("audience", audience);
+
+  if (new Date(event.endDate) < new Date()) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Broadcasts cannot be sent for past events",
+    );
+  }
+
+  if (channel !== "email") {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Only email broadcasts are supported",
+    );
+  }
+
+  const recipients = await Ticket.find(
+    getBroadcastTicketFilter(event._id, audience),
+  )
+    .select("buyerInfo status ticketCode checkInCode")
+    .lean();
+
+  console.log("recipients", recipients);
+
+  const broadcast = await EventBroadcast.create({
+    eventId: event._id,
+    channel,
+    audience,
+    subject: subject.trim(),
+    message: message.trim(),
+    sentBy: userId,
+    recipientCount: recipients.length,
+    deliveredCount: 0,
+    failedCount: 0,
+    status: "queued",
+  });
+
+  await createEventAuditLog({
+    eventId: event._id,
+    action: "broadcast.sent",
+    category: "broadcast",
+    summary: `Broadcast queued for ${recipients.length} recipient(s)`,
+    actor: userId,
+    metadata: { broadcastId: broadcast._id, channel, audience, subject },
+    ipAddress,
+    userAgent,
+  });
+
+  setImmediate(async () => {
+    try {
+      await EventBroadcast.findByIdAndUpdate(broadcast._id, {
+        status: "sending",
+      });
+
+      skauteEvents.emit("event.broadcast.created", {
+        event,
+        broadcast,
+        recipients,
+      });
+
+      await EventBroadcast.findByIdAndUpdate(broadcast._id, {
+        status: "sent",
+        deliveredCount: recipients.length,
+        failedCount: 0,
+        sentAt: new Date(),
+      });
+    } catch (error: any) {
+      await EventBroadcast.findByIdAndUpdate(broadcast._id, {
+        status: "failed",
+        failedCount: recipients.length,
+        failureReason: error.message,
+      });
+    }
+  });
+
+  return EventBroadcast.findById(broadcast._id)
+    .populate("sentBy", "name email")
+    .lean();
+};
+
+export const getEventAuditLogs = async (eventId: string, userId: string) => {
+  await assertEventPermission(eventId, userId);
+
+  const logs = await EventAuditLog.find({ eventId })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .populate("actor", "name email")
+    .lean();
+
+  return logs.map(serializeAuditLog);
+};
+
+export const resolveGateIncident = async ({
+  eventId,
+  incidentId,
+  userId,
+  resolution,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  incidentId: string;
+  userId: string;
+  resolution: "allowed" | "denied" | "reviewed";
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  await assertEventPermission(eventId, userId, "scan_tickets");
+
+  const incident = await GateIncident.findOneAndUpdate(
+    { _id: incidentId, eventId },
+    {
+      status: "resolved",
+      resolution,
+      resolvedBy: userId,
+      resolvedAt: new Date(),
+    },
+    { new: true, runValidators: true },
+  ).lean();
+
+  if (!incident)
+    throw new AppError(httpStatus.NOT_FOUND, "Gate incident not found");
+
+  await createEventAuditLog({
+    eventId,
+    action: "security.incident_resolved",
+    category: "security",
+    summary: `Gate incident resolved as ${resolution}`,
+    actor: userId,
+    severity: "warning",
+    metadata: { incidentId, resolution },
+    ipAddress,
+    userAgent,
+  });
+
+  return incident;
+};
+
+export const renameScannerDevice = async ({
+  eventId,
+  deviceId,
+  userId,
+  label,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  deviceId: string;
+  userId: string;
+  label: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  await assertEventPermission(eventId, userId, "scan_tickets");
+
+  const device = await ScannerDevice.findOneAndUpdate(
+    { eventId, deviceId },
+    { label: label.trim() },
+    { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+  ).lean();
+
+  await createEventAuditLog({
+    eventId,
+    action: "scanner_device.renamed",
+    category: "scanner_device",
+    summary: `Scanner device renamed to ${label.trim()}`,
+    actor: userId,
+    metadata: { deviceId, label: label.trim() },
+    ipAddress,
+    userAgent,
+  });
+
+  return device;
+};
+
+export const revokeScannerDevice = async ({
+  eventId,
+  deviceId,
+  userId,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  deviceId: string;
+  userId: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  await assertEventPermission(eventId, userId, "scan_tickets");
+
+  const device = await ScannerDevice.findOneAndUpdate(
+    { eventId, deviceId },
+    {
+      status: "revoked",
+      revokedBy: userId,
+      revokedAt: new Date(),
+    },
+    { new: true },
+  ).lean();
+
+  if (!device)
+    throw new AppError(httpStatus.NOT_FOUND, "Scanner device not found");
+
+  await createEventAuditLog({
+    eventId,
+    action: "scanner_device.revoked",
+    category: "scanner_device",
+    summary: `Scanner device ${deviceId} revoked`,
+    actor: userId,
+    severity: "warning",
+    metadata: { deviceId },
+    ipAddress,
+    userAgent,
+  });
+
+  return device;
+};
+
+export const getEventRefunds = async (eventId: string, userId: string) => {
+  await assertEventPermission(eventId, userId, "issue_refunds");
+
+  return EventRefund.find({ eventId }).sort({ createdAt: -1 }).lean();
+};
+
+export const approveEventRefund = async ({
+  eventId,
+  refundId,
+  userId,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  refundId: string;
+  userId: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  await assertEventPermission(eventId, userId, "issue_refunds");
+
+  const refund = await EventRefund.findOne({ _id: refundId, eventId });
+  if (!refund)
+    throw new AppError(httpStatus.NOT_FOUND, "Refund request not found");
+
+  const ticket = await Ticket.findById(refund.ticket);
+  if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
+  if (ticket.status === TICKET_STATUS.used) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Used tickets cannot be refunded without an admin override",
+    );
+  }
+
+  refund.status = "processing";
+  refund.decidedBy = new Types.ObjectId(userId);
+  await refund.save();
+
+  ticket.status = TICKET_STATUS.refunded;
+  await ticket.save();
+
+  await Transaction.create({
+    user: ticket.owner,
+    event: ticket.event,
+    type: "refund",
+    amount: -Number(ticket.pricePaid || 0),
+    fee: 0,
+    netAmount: -Number(ticket.pricePaid || 0),
+    status: "success",
+    reference: `REFUND-${ticket.ticketCode}-${Date.now()}`,
+    metadata: {
+      refundId: refund._id,
+      ticketCode: ticket.ticketCode,
+      reason: refund.reason,
+    },
+  });
+
+  refund.status = "processed";
+  refund.ticketStatus = ticket.status;
+  await refund.save();
+
+  await createEventAuditLog({
+    eventId,
+    action: "refund.processed",
+    category: "refund",
+    summary: `Refund processed for ${refund.guestName}`,
+    actor: userId,
+    metadata: {
+      refundId,
+      ticketCode: refund.ticketCode,
+      amount: refund.amount,
+    },
+    ipAddress,
+    userAgent,
+  });
+
+  return refund.toObject();
+};
+
+export const rejectEventRefund = async ({
+  eventId,
+  refundId,
+  userId,
+  adminNote,
+  ipAddress,
+  userAgent,
+}: {
+  eventId: string;
+  refundId: string;
+  userId: string;
+  adminNote?: string;
+  ipAddress?: string;
+  userAgent?: string;
+}) => {
+  await assertEventPermission(eventId, userId, "issue_refunds");
+
+  const refund = await EventRefund.findOneAndUpdate(
+    { _id: refundId, eventId },
+    {
+      status: "rejected",
+      decidedBy: userId,
+      decisionReason: adminNote,
+    },
+    { new: true, runValidators: true },
+  ).lean();
+
+  if (!refund)
+    throw new AppError(httpStatus.NOT_FOUND, "Refund request not found");
+
+  await createEventAuditLog({
+    eventId,
+    action: "refund.rejected",
+    category: "refund",
+    summary: `Refund rejected for ${refund.guestName}`,
+    actor: userId,
+    metadata: { refundId, ticketCode: refund.ticketCode, adminNote },
+    ipAddress,
+    userAgent,
+  });
+
+  return refund;
+};
+
+export const getPostEventReport = async (eventId: string, userId: string) => {
+  const { event } = await assertEventPermission(eventId, userId);
+
+  const [tickets, refunds, incidents, transactions, scanLogs] =
+    await Promise.all([
+      Ticket.find({ event: eventId }).lean(),
+      EventRefund.find({ eventId }).lean(),
+      GateIncident.find({ eventId }).lean(),
+      Transaction.find({ event: eventId }).lean(),
+      ScanLog.find({ event: eventId }).sort({ scannedAt: 1 }).lean(),
+    ]);
+
+  const totalTickets = tickets.length;
+  const checkedIn = tickets.filter(
+    (ticket) => ticket.status === TICKET_STATUS.used,
+  ).length;
+  const noShows = Math.max(totalTickets - checkedIn, 0);
+  const duplicateAttempts = scanLogs.filter(
+    (log) => log.status === SCAN_LOG_STATUS.DUPLICATE,
+  ).length;
+  const grossRevenue = transactions
+    .filter((txn) => ["ticket_sale", "gate_sale"].includes(txn.type))
+    .reduce((sum, txn) => sum + Number(txn.amount || 0), 0);
+  const refundTotal = refunds
+    .filter((refund) =>
+      ["approved", "processing", "processed"].includes(refund.status),
+    )
+    .reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
+  const organizerRevenue = transactions.reduce(
+    (sum, txn) => sum + Number(txn.netAmount || 0),
+    0,
+  );
+
+  const hourlyBuckets: Record<string, number> = {};
+  scanLogs.forEach((log) => {
+    const date = new Date(log.scannedAt || log.createdAt);
+    const hour = date.getHours();
+    const key = `${hour}:00`;
+    hourlyBuckets[key] = (hourlyBuckets[key] || 0) + 1;
+  });
+  const peakHour = Object.entries(hourlyBuckets).sort(
+    (a, b) => b[1] - a[1],
+  )[0]?.[0];
+  const peakCheckInWindow = peakHour
+    ? `${peakHour} - ${(Number(peakHour.split(":")[0]) + 1) % 24}:00`
+    : "N/A";
+
+  const tierMap = new Map<
+    string,
+    { tierName: string; sold: number; checkedIn: number; revenue: number }
+  >();
+  tickets.forEach((ticket) => {
+    const tierName = ticket.tierName || "General Admission";
+    const current = tierMap.get(tierName) || {
+      tierName,
+      sold: 0,
+      checkedIn: 0,
+      revenue: 0,
+    };
+    current.sold += 1;
+    current.revenue += Number(ticket.pricePaid || 0);
+    if (ticket.status === TICKET_STATUS.used) current.checkedIn += 1;
+    tierMap.set(tierName, current);
+  });
+
+  return {
+    totalTickets,
+    checkedIn,
+    noShows,
+    checkInRate: totalTickets
+      ? Math.round((checkedIn / totalTickets) * 100)
+      : 0,
+    grossRevenue,
+    organizerRevenue,
+    refunds: refundTotal,
+    duplicateAttempts,
+    peakCheckInWindow,
+    tierBreakdown: Array.from(tierMap.values()),
+    incidentSummary: incidents.map((incident) => ({
+      type: incident.type,
+      severity: incident.severity,
+      status: incident.status,
+      resolution: incident.resolution,
+      createdAt: incident.createdAt,
+    })),
+    event: {
+      _id: event._id,
+      title: event.title,
+      startDate: event.startDate,
+      endDate: event.endDate,
+    },
+  };
 };

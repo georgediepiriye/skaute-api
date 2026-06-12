@@ -582,3 +582,230 @@ export const deleteEvent = async (
     next(error);
   }
 };
+
+const currentUserId = (req: Request) =>
+  ((req as any).user?._id || (req as any).user?.id)?.toString();
+
+export const getEventBroadcasts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const broadcasts = await eventService.getEventBroadcasts(
+      req.params.eventId as string,
+      currentUserId(req),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { broadcasts },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createEventBroadcast = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const broadcast = await eventService.createEventBroadcast({
+      eventId: req.params.eventId as string,
+      userId: currentUserId(req),
+      channel: req.body.channel,
+      audience: req.body.audience,
+      subject: req.body.subject,
+      message: req.body.message,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.CREATED).json({
+      status: "success",
+      data: { broadcast },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getEventAuditLogs = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const logs = await eventService.getEventAuditLogs(
+      req.params.eventId as string,
+      currentUserId(req),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { logs },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resolveGateIncident = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const incident = await eventService.resolveGateIncident({
+      eventId: req.params.eventId as string,
+      incidentId: req.params.incidentId as string,
+      userId: currentUserId(req),
+      resolution: req.body.resolution,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { incident },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateScannerDevice = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const device = await eventService.renameScannerDevice({
+      eventId: req.params.eventId as string,
+      deviceId: req.params.deviceId as string,
+      userId: currentUserId(req),
+      label: req.body.label,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { device },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const revokeScannerDevice = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const device = await eventService.revokeScannerDevice({
+      eventId: req.params.eventId as string,
+      deviceId: req.params.deviceId as string,
+      userId: currentUserId(req),
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { device },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getEventRefunds = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const refunds = await eventService.getEventRefunds(
+      req.params.eventId as string,
+      currentUserId(req),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { refunds },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const approveEventRefund = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const refund = await eventService.approveEventRefund({
+      eventId: req.params.eventId as string,
+      refundId: req.params.refundId as string,
+      userId: currentUserId(req),
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { refund },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rejectEventRefund = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const refund = await eventService.rejectEventRefund({
+      eventId: req.params.eventId as string,
+      refundId: req.params.refundId as string,
+      userId: currentUserId(req),
+      adminNote: req.body.adminNote || req.body.reason,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { refund },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPostEventReport = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const report = await eventService.getPostEventReport(
+      req.params.eventId as string,
+      currentUserId(req),
+    );
+
+    res.status(httpStatus.OK).json({
+      status: "success",
+      data: { report },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

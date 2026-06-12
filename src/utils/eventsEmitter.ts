@@ -6,6 +6,7 @@ import {
   sendWelcomeEmail,
   sendEventModerationEmail,
   sendCancellationEmail,
+  sendBroadcastEmail,
 } from "./emailService.js"; // Assume sendRefundEmail exists
 
 // Initialize the EventEmitter
@@ -61,11 +62,17 @@ const handleOrderFulfilled = async ({
       );
     }
 
-    await sendTicketEmail(order.buyerEmail, tickets, eventImage, isDelayedReconciliation, {
-      event,
-      order,
-      isManualPlacement,
-    });
+    await sendTicketEmail(
+      order.buyerEmail,
+      tickets,
+      eventImage,
+      isDelayedReconciliation,
+      {
+        event,
+        order,
+        isManualPlacement,
+      },
+    );
 
     logger.info(
       `Background: Ticket delivery email sent successfully to ${order.buyerEmail}`,
@@ -184,16 +191,62 @@ const handleTicketResent = async ({
       `Background: Re-dispatching ticket ${ticket.ticketCode} to ${order.buyerEmail}`,
     );
 
-    await sendTicketEmail(order.buyerEmail, [ticket], ticket.event?.image, false, {
-      event: ticket.event,
-      order,
-    });
+    await sendTicketEmail(
+      order.buyerEmail,
+      [ticket],
+      ticket.event?.image,
+      false,
+      {
+        event: ticket.event,
+        order,
+      },
+    );
 
     logger.info(`Background: Ticket resend delivered to ${order.buyerEmail}`);
   } catch (error: any) {
     logger.error(
       `Background Error: Failed to execute ticket resend: ${error.message}`,
     );
+  }
+};
+
+/**
+ * Handle Event Broadcast (Email Blast)
+ */
+const handleEventBroadcast = async ({
+  event,
+  broadcast,
+  recipients,
+}: {
+  event: any;
+  broadcast: any;
+  recipients: any[];
+}) => {
+  try {
+    logger.info(
+      `Background: Dispatching broadcast '${broadcast.subject}' to ${recipients.length} recipients.`,
+    );
+
+    // Map recipients to email promises
+    const emailPromises = recipients.map((ticket) => {
+      // Assuming your ticket object has the buyer email
+      const email = ticket.buyerInfo?.email;
+      if (email) {
+        return sendBroadcastEmail(email, broadcast.subject, broadcast.message);
+      }
+      return Promise.resolve();
+    });
+
+    await Promise.all(emailPromises);
+
+    logger.info(
+      `Background: Successfully dispatched broadcast ${broadcast._id}`,
+    );
+  } catch (error: any) {
+    logger.error(
+      `Background Error: Broadcast delivery failed: ${error.message}`,
+    );
+    throw error; // This will trigger the catch block in your controller
   }
 };
 
@@ -207,6 +260,7 @@ skauteEvents.removeAllListeners("user.signup");
 skauteEvents.removeAllListeners("event.moderated");
 skauteEvents.removeAllListeners("event.cancelled");
 skauteEvents.removeAllListeners("ticket.resend");
+skauteEvents.removeAllListeners("event.broadcast.created");
 
 // Register the listeners
 skauteEvents.on("order.fulfilled", handleOrderFulfilled);
@@ -215,6 +269,7 @@ skauteEvents.on("user.signup", handleUserSignup);
 skauteEvents.on("event.moderated", handleEventModerated);
 skauteEvents.on("event.cancelled", handleEventCancelled);
 skauteEvents.on("ticket.resend", handleTicketResent);
+skauteEvents.on("event.broadcast.created", handleEventBroadcast);
 skauteEvents.setMaxListeners(20);
 
 export default skauteEvents;

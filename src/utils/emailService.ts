@@ -477,3 +477,28 @@ export const sendCancellationEmail = async (
     throw error;
   }
 };
+
+export const sendBroadcastEmail = async (
+  to: string,
+  subject: string,
+  message: string,
+) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: "Skaute <hello@skaute.com>",
+      to,
+      subject: subject,
+      html: emailShell(`
+        ${headingHtml(subject)}
+        ${paragraphHtml(message)}
+        ${buttonHtml("View on Skaute", DISCOVER_URL)}
+      `),
+    });
+
+    if (error) throw new Error(error.message);
+    return data;
+  } catch (error: any) {
+    logger.error(`Resend Broadcast Failure for ${to}: ${error.message}`);
+    throw error;
+  }
+};

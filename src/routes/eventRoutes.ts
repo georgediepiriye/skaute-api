@@ -63,6 +63,41 @@ router.get(
   eventController.getManagementDashboardData,
 );
 
+router.get("/:eventId/broadcasts", eventController.getEventBroadcasts);
+router.post(
+  "/:eventId/broadcasts",
+  writeLimiter,
+  eventController.createEventBroadcast,
+);
+router.get("/:eventId/audit-logs", eventController.getEventAuditLogs);
+router.patch(
+  "/:eventId/gate-incidents/:incidentId/resolve",
+  writeLimiter,
+  eventController.resolveGateIncident,
+);
+router.patch(
+  "/:eventId/scanner-devices/:deviceId",
+  writeLimiter,
+  eventController.updateScannerDevice,
+);
+router.delete(
+  "/:eventId/scanner-devices/:deviceId",
+  writeLimiter,
+  eventController.revokeScannerDevice,
+);
+router.get("/:eventId/refunds", eventController.getEventRefunds);
+router.patch(
+  "/:eventId/refunds/:refundId/approve",
+  writeLimiter,
+  eventController.approveEventRefund,
+);
+router.patch(
+  "/:eventId/refunds/:refundId/reject",
+  writeLimiter,
+  eventController.rejectEventRefund,
+);
+router.get("/:eventId/post-event-report", eventController.getPostEventReport);
+
 router.post(
   "/:id/tickets/issue-manual",
   ticketActionLimiter,

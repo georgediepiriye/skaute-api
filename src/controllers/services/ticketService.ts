@@ -19,6 +19,40 @@ import skauteEvents from "../../utils/eventsEmitter.js";
 import { User } from "../../models/User.js";
 import { Discount } from "../../models/Discount.js";
 import { Transaction } from "../../models/Transaction.js";
+import { ScannerDevice } from "../../models/ScannerDevice.js";
+import { EventAuditLog } from "../../models/EventAuditLog.js";
+
+const writeTicketAuditLog = async ({
+  eventId,
+  actor,
+  action,
+  category,
+  summary,
+  severity = "info",
+  metadata = {},
+}: {
+  eventId: any;
+  actor?: any;
+  action: string;
+  category: string;
+  summary: string;
+  severity?: "info" | "warning" | "critical";
+  metadata?: Record<string, any>;
+}) => {
+  try {
+    await EventAuditLog.create({
+      eventId,
+      actor,
+      action,
+      category,
+      summary,
+      severity,
+      metadata,
+    });
+  } catch (error: any) {
+    logger.warn(`Audit log write failed: ${error.message}`);
+  }
+};
 
 /**
  * Locks inventory by incrementing the sold count only if capacity allows.
@@ -522,6 +556,20 @@ export const processTicketCheckIn = async (
     throw new AppError(httpStatus.FORBIDDEN, "Not authorized to scan");
   }
 
+  if (deviceFingerprint) {
+    const scannerDevice = await ScannerDevice.findOne({
+      eventId,
+      deviceId: deviceFingerprint,
+    });
+
+    if (scannerDevice?.status === "revoked") {
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        "This scanner device has been revoked for this event.",
+      );
+    }
+  }
+
   const sanitizedCode = checkInCode.trim().toUpperCase();
 
   const exactCheckInTime = offlineTimestamp
@@ -649,6 +697,38 @@ export const processTicketCheckIn = async (
     scanner: scannerId,
     status: SCAN_LOG_STATUS.SUCCESS,
     deviceFingerprint,
+  });
+
+  if (deviceFingerprint) {
+    await ScannerDevice.findOneAndUpdate(
+      { eventId, deviceId: deviceFingerprint },
+      {
+        $set: {
+          lastSeen: new Date(),
+          operator: scannerId,
+          status: "active",
+        },
+        $inc: { scanCount: 1 },
+        $setOnInsert: {
+          label: "Scanner",
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  }
+
+  await writeTicketAuditLog({
+    eventId,
+    actor: scannerId,
+    action: "ticket.scanner_check_in",
+    category: "ticket",
+    summary: `Scanner check-in for ${ticket.buyerInfo.firstName} ${ticket.buyerInfo.lastName}`,
+    metadata: {
+      ticketId: ticket._id,
+      ticketCode: ticket.ticketCode,
+      checkInCode: ticket.checkInCode,
+      deviceFingerprint,
+    },
   });
 
   return {
@@ -818,6 +898,19 @@ export const processTicketRefund = async (ticketCode: string) => {
     // Commit all changes together (Ticket Status + Event Inventory Counters + Transaction Log)
     await session.commitTransaction();
 
+    await writeTicketAuditLog({
+      eventId: ticket.event,
+      actor: order.user,
+      action: "refund.processed",
+      category: "refund",
+      summary: `Refund processed for ticket ${ticket.ticketCode}`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketCode,
+        amount: grossRefundAmount,
+      },
+    });
+
     // 5. Async Notification
     skauteEvents.emit("ticket.refunded", { ticket, order });
 
@@ -856,6 +949,19 @@ export const processManualCheckIn = async (
     status: SCAN_LOG_STATUS.SUCCESS_MANUAL_OVERRIDE,
   });
 
+  await writeTicketAuditLog({
+    eventId: ticket.event,
+    actor: staffId,
+    action: "ticket.manual_check_in",
+    category: "ticket",
+    summary: `Manual check-in for ${ticket.buyerInfo.firstName} ${ticket.buyerInfo.lastName}`,
+    metadata: {
+      ticketId: ticket._id,
+      ticketCode: ticket.ticketCode,
+      checkInCode: ticket.checkInCode,
+    },
+  });
+
   return ticket;
 };
 
@@ -866,6 +972,18 @@ export const processResendTicket = async (ticketCode: string) => {
   if (!ticket) throw new AppError(httpStatus.NOT_FOUND, "Ticket not found");
 
   skauteEvents.emit("ticket.resend", { ticket, order: ticket.order });
+
+  await writeTicketAuditLog({
+    eventId: ticket.event,
+    action: "ticket.resend",
+    category: "ticket",
+    summary: `Ticket resent to ${ticket.buyerInfo.email}`,
+    metadata: {
+      ticketId: ticket._id,
+      ticketCode: ticket.ticketCode,
+      email: ticket.buyerInfo.email,
+    },
+  });
 
   return { success: true };
 };
@@ -921,6 +1039,19 @@ export const processTicketTransfer = async (
     );
 
     await session.commitTransaction();
+
+    await writeTicketAuditLog({
+      eventId: ticket.event,
+      action: "ticket.transfer",
+      category: "ticket",
+      summary: `Ticket transferred from ${oldBuyerEmail} to ${newBuyerData.email}`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketCode: ticket.ticketCode,
+        oldBuyerEmail,
+        newBuyerEmail: newBuyerData.email,
+      },
+    });
 
     // 3. Optional: Emit event if you want to notify the new owner
     skauteEvents.emit("ticket.transferred", { ticket, oldBuyerEmail });

@@ -22,6 +22,7 @@ import config from "../../config/config.js";
 import AppError from "../../utils/AppError.js";
 import logger from "../../utils/logger.js";
 import { v2 as cloudinary } from "cloudinary";
+import { EventAuditLog } from "../../models/EventAuditLog.js";
 
 cloudinary.config({
   cloud_name: config.cloudinary.cloudName,
@@ -224,10 +225,7 @@ export const updateHotspotSuggestion = async (id: string, data: any) => {
   return suggestion;
 };
 
-export const approveHotspotSuggestion = async (
-  id: string,
-  adminId: string,
-) => {
+export const approveHotspotSuggestion = async (id: string, adminId: string) => {
   const suggestion = await HotspotSuggestion.findById(id);
   if (!suggestion) {
     throw new AppError(httpStatus.NOT_FOUND, "Hotspot suggestion not found");
@@ -432,7 +430,12 @@ const toMapboxCandidate = (
     feature.text ||
     feature.place_name;
 
-  if (!sourceId || !name || !Array.isArray(coordinates) || coordinates.length < 2) {
+  if (
+    !sourceId ||
+    !name ||
+    !Array.isArray(coordinates) ||
+    coordinates.length < 2
+  ) {
     return null;
   }
 
@@ -749,7 +752,10 @@ export const previewMapboxHotspotCandidates = async ({
     const candidates = rawFeatures
       .map((feature: any) => toMapboxCandidate(feature, category, areaCenter))
       .filter((candidate: any) => {
-        return candidate && (!radiusMeters || candidate.distanceMeters <= radiusMeters);
+        return (
+          candidate &&
+          (!radiusMeters || candidate.distanceMeters <= radiusMeters)
+        );
       })
       .slice(0, clampedLimit);
 
@@ -796,7 +802,9 @@ export const importMapboxHotspotCandidates = async (
     const hotspot = await Hotspot.create({
       title: candidate.name,
       description: "",
-      category: mapMapboxCategoryToHotspotCategory(candidate.category || "other"),
+      category: mapMapboxCategoryToHotspotCategory(
+        candidate.category || "other",
+      ),
       status: "ACTIVE",
       image: "https://picsum.photos/seed/skaute-hotspot/1200/800",
       gallery: [],
@@ -816,7 +824,9 @@ export const importMapboxHotspotCandidates = async (
       mapboxId: candidate.sourceId,
       sourceCategories: candidate.sourceCategories || [],
       importStatus: "needs_review",
-      importedBy: adminUserId ? new mongoose.Types.ObjectId(adminUserId) : undefined,
+      importedBy: adminUserId
+        ? new mongoose.Types.ObjectId(adminUserId)
+        : undefined,
       importedAt: new Date(),
     });
 
@@ -861,7 +871,10 @@ const applyContributionToHotspot = async (hotspot: any, contribution: any) => {
 
   if (contribution.type === "photo" && payload.imageUrl) {
     const currentGallery = hotspot.gallery || [];
-    if (currentGallery.length < 5 && !currentGallery.includes(payload.imageUrl)) {
+    if (
+      currentGallery.length < 5 &&
+      !currentGallery.includes(payload.imageUrl)
+    ) {
       hotspot.gallery = [...currentGallery, payload.imageUrl];
     }
   }
@@ -1084,6 +1097,19 @@ export const processBulkTicketIssue = async (
         eventImage: event.image,
         isManualPlacement: true,
       });
+    });
+
+    await EventAuditLog.create({
+      eventId: event._id,
+      actor: new mongoose.Types.ObjectId(adminId),
+      action: "ticket.bulk_issued",
+      category: "ticket",
+      summary: `${createdTickets.length} bulk ticket(s) issued`,
+      severity: "info",
+      metadata: {
+        ticketIds: createdTickets.map((ticket) => ticket._id),
+        guestEmails: createdTickets.map((ticket) => ticket.buyerInfo.email),
+      },
     });
 
     return createdTickets;
